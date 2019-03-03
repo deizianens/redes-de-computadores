@@ -1,39 +1,44 @@
-# usage: ./app-server.py <host> <port>
-
 import socket
 import sys
 import struct
+import threading
 
-def client_main():
-    # cria socket. argumentos: (IPV4, TCP oriented)
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+# usage: ./app-server.py <host> <port>
 
-    # 192.168.1.6
-    HOST =  sys.argv[1]     # Host: endereço IP
-    PORT = int(sys.argv[2]) # Port: porto 
+TIMEOUT = 15 # tempo que o server deve esperar para receber os dados (15 segundos)
 
-    try:
-        s.connect((HOST, PORT)) # Estabelece conexão.
-    except socket.error as e:
-        print('Falha de conexão: '+str(e))
-        sys.exit()
+# classe que gera os clientes
+class Cliente(threading.Thread):
+    def __init__(self, c, host, port, *mensagem):
+        self.c = c          # numero de identificação do cliente
+        self.host = host    # servidor a ser conectado
+        self.port = port
+        self.msg = mensagem
 
-    '''
-        Mensagem a ser enviada:
-            - 1 byte = operação a ser realizada (0 subtração, 1 adição)
-            - 4 bytes = número inteiro codificado em network byte order
-    '''
-    msg = input()
+        threading.Thread.__init__(self)
 
-    # Converte mensagem para ASCII
-    msg.encode('ascii')
+    def run(self):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-    p_size = struct.pack('!i', msg)
-    s.send(p_size)
-    s.recv(32)
+        try:
+            s.connect((self.host, self.port)) # Estabelece conexão.
+        except socket.error as e:
+            print('Falha de conexão: '+str(e))
+            sys.exit()
+        
+        s.send(msg)
 
-    s.close()
+        data = s.recv(1024) # recebe resposta do servidor
+        print(data)
+
+        s.close()
+
 
 if __name__ == '__main__':
+    HOST =  sys.argv[1]     # Host: endereço IP
+    PORT = int(sys.argv[2]) # Port: porto 
+    m = input()
+    msg = m.encode()
 
-    client_main()
+    for i in range(1):
+        Cliente(i, HOST, PORT, *msg).start()
