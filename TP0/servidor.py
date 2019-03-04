@@ -55,9 +55,9 @@ def server_main():
 def decodeMsg(data):
     global CONTADOR
     if(data[0] == '1'):
-        CONTADOR = (CONTADOR + int(data[1:])) % 1000
+        CONTADOR = (CONTADOR + int(data[1:])) % 1000000
     else:
-        CONTADOR = (CONTADOR - int(data[1:])) % 1000
+        CONTADOR = (CONTADOR - int(data[1:])) % 1000000
     
     return str(CONTADOR)
 
