@@ -33,7 +33,7 @@ class Cliente(threading.Thread):
         s.send(msg)
 
         data = s.recv(1024) # recebe resposta do servidor
-        print(data)
+        print(data.decode())
 
         s.close()
 

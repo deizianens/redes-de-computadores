@@ -28,18 +28,17 @@ def server_main():
     s.listen(1)
 
     while True:
-        print('Aguardando conexão!')
+        # print('Aguardando conexão!')
         conn, addr = s.accept() # abre conexão entre cliente e servidor
         try:
             while True:
                 data = conn.recv(40) # recebe os dados (40 bits = 5 bytes)                
-                
-                data = data.decode()
-
-                result = decodeMsg(data)
-                result = result.encode()
 
                 if data:
+                    data = data.decode()
+
+                    result = decodeMsg(str(data))
+                    result = result.encode()
                     ''' 
                         Transmite mensagem de volta (Valor do contador)
                             - Representada como string (ASCII), seis caracteres de 0 a 999999
@@ -55,7 +54,7 @@ def server_main():
 
 def decodeMsg(data):
     global CONTADOR
-    if(data[0] == 1):
+    if(data[0] == '1'):
         CONTADOR = (CONTADOR + int(data[1:])) % 1000
     else:
         CONTADOR = (CONTADOR - int(data[1:])) % 1000
