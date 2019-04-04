@@ -10,50 +10,62 @@ TIMEOUT = 15 # tempo que o server deve esperar para receber os dados (15 segundo
 
 # classe que gera os clientes
 class Cliente(threading.Thread):
-    def __init__(self, c, host, port, *mensagem):
+    def __init__(self, c, host, port):
         self.c = c          # numero de identificação do cliente
         self.host = host    # servidor a ser conectado
-        self.port = port
-        self.msg = mensagem
+        self.port = port    # porto
 
         threading.Thread.__init__(self)
 
     def run(self):
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-        tv = struct.pack("ll", TIMEOUT, (1000*TIMEOUT)) # timeout
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDTIMEO, tv)
+        tv = struct.pack("ll", TIMEOUT, 0) # timeout
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVTIMEO, tv)
         
         try:
             s.connect((self.host, self.port)) # Estabelece conexão.
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         except socket.error as e:
             print('Falha de conexão: '+str(e))
             sys.exit()
 
-        s.send(msg)
+        msg = get_msg() # lê comando do teclado
 
-        data = s.recv(1024) # recebe resposta do servidor
-        print(data.decode())
+        while(1):
+            s_msg = encode_msg(msg) 
+            s.send(s_msg)
 
-        s.close()
+            data = s.recv(1024) # recebe resposta do servidor
+            print(data.decode('ascii'))
+
+            msg = get_msg() # lê comando do teclado
+
+        s.close() # fecha conexão
 
 
-def encodeMsg(msg):
-    if(msg[0] == '+'):
-        op = '1'+msg[1:]
-    elif (msg[0] == '-'):
-        op = '0'+msg[1:]
+def encode_msg(msg):
+    data = msg.split(" ") # toda mensagem consiste em sinal + espaço + valor (e.g + 123)
+    op = data[0]
+    value = data[1]
 
-    return op
+    if(op == '+'):
+        op = '1'
+    elif (op == '-'):
+        op = '0'
+
+    encoded_value = struct.pack("!I", int(value)) # !I = network byte order unsigned int
+    return op + encoded_value
+
+def get_msg(): 
+	entrada = input()
+	if entrada: 
+		return entrada
 
 
 if __name__ == '__main__':
     HOST =  sys.argv[1]     # Host: endereço IP
     PORT = int(sys.argv[2]) # Port: porto 
-    msg = input()
-    msg = encodeMsg(msg)
-    
-    msg = msg.encode()
 
     for i in range(1):
-        Cliente(i, HOST, PORT, *msg).start()
+        Cliente(i, HOST, PORT).start()
