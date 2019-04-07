@@ -1,7 +1,8 @@
+# -*- coding: utf-8 -*-
+
 import socket
 import sys
 import struct
-import threading
 import time
 
 # usage: ./cliente.py <host> <port>
@@ -9,13 +10,10 @@ import time
 TIMEOUT = 15 # tempo que o server deve esperar para receber os dados (15 segundos)
 
 # classe que gera os clientes
-class Cliente(threading.Thread):
-    def __init__(self, c, host, port):
-        self.c = c          # numero de identificação do cliente
+class Cliente():
+    def __init__(self, host, port):
         self.host = host    # servidor a ser conectado
         self.port = port    # porto
-
-        threading.Thread.__init__(self)
 
     def run(self):
 
@@ -57,15 +55,17 @@ def encode_msg(msg):
     encoded_value = struct.pack("!I", int(value)) # !I = network byte order unsigned int
     return op + encoded_value
 
-def get_msg(): 
-	entrada = input()
-	if entrada: 
-		return entrada
-
+def get_msg():
+    try: 
+	    entrada = raw_input()
+	    if entrada: 
+		    return entrada
+    except KeyboardInterrupt:
+        sys.exit()
 
 if __name__ == '__main__':
     HOST =  sys.argv[1]     # Host: endereço IP
     PORT = int(sys.argv[2]) # Port: porto 
 
-    for i in range(1):
-        Cliente(i, HOST, PORT).start()
+    c = Cliente(HOST, PORT)
+    c.run()

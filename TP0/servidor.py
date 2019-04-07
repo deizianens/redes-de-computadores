@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import socket
 import sys
 import struct
@@ -28,13 +29,16 @@ def server_main(p):
     s.listen(1)
 
     while True:
-        # print('Aguardando conexão!')
-        conn, addr = s.accept() # abre conexão entre cliente e servidor
+        try:
+            # print('Aguardando conexão!')
+            conn, addr = s.accept() # abre conexão entre cliente e servidor
+        except KeyboardInterrupt:
+                sys.exit()
 
         # print ('Conectado por', addr)
         
-        try:
-            while True:
+        while True:
+            try:
                 data = conn.recv(MSG_SIZE) # recebe os dados                
 
                 if data:
@@ -50,10 +54,13 @@ def server_main(p):
                     conn.sendall(result) 
                 else:
                     break
-                
-        finally: # garante que conexão seja encerrada mesmo que haja erro
-            # encerra conexão
-            conn.close()
+            except Exception:
+                print("Falha ao receber mensagem!")
+            except KeyboardInterrupt:
+                sys.exit()
+
+        # encerra conexão
+        conn.close()
 
 
 def decode_msg(data):
