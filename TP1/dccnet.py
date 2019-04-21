@@ -25,21 +25,26 @@ class Data:
         self.id = id
         self.flags = flags
 
-    def prepare_for_new_data(self):
+    def prepare_data(self):
         self.confirmed = False
-        self.id = 1 if self.id == 0 else 0
+        self.id = 1 if self.id == 0 else 0 # muda id (alterna entre 0 e 1)
 
     @staticmethod
     def _format_numbers(number, is_2_bytes=True):
         pattern = '{:04x}' if is_2_bytes else '{:02x}'
         return pattern.format(number)
 
+    '''
+        Formato de um quadro DCCNET
+        SOF    | ID      | flags   | checksum   | dados          | EOF
+        1 byte | 1 byte  | 1 byte  | 2 bytes    | max 512 bytes  | 1 byte
+
+    '''
     def checksum(self):
-        data = 2 * SYNC
-        data += self._format_numbers(len(self.data))
-        data += self._format_numbers(0)
+        data = SOF #  início de um novo quadro
         data += self._format_numbers(self.id, False)
         data += self._format_numbers(self.flags, False)
+        data += self._format_numbers(0)
         data = binascii.unhexlify(data.encode()) + self.data
 
         checksum = 0
@@ -67,12 +72,11 @@ class Data:
         self.data = binascii.unhexlify(new_data)
 
     def get_frame(self):
-        formatted_length = self._format_numbers(len(self.data))
-        formatted_checksum = self._format_numbers(self.checksum())
         formatted_id = self._format_numbers(self.id, False)
         formatted_flags = self._format_numbers(self.flags, False)
+        formatted_checksum = self._format_numbers(self.checksum())
         encoded_data = self.encode16()
-        header = (formatted_length + formatted_checksum + formatted_id + formatted_flags).encode()
+        header = (formatted_id + formatted_flags + formatted_checksum).encode()
         return header + encoded_data
 
 
@@ -104,8 +108,6 @@ def initialize_client():
     # Conexão TCP
     connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     connection.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    # Timeout de 1s para envio na conexão
-    connection.setsockopt(socket.SOL_SOCKET, socket.SO_SNDTIMEO, struct.pack('LL', 10, 0)) 
     connection.connect((IP, PORT))
 
     # Threads para enviar e receber (paralelamente)
@@ -144,8 +146,6 @@ def init_server():
         s.bind((IP, PORT))
         s.listen()
         connection, addr = s.accept()
-        # Timeout de 1s para recebimento na conexão
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVTIMEO, struct.pack('LL', 10, 0))
     
     except KeyboardInterrupt:
         s.close()
@@ -173,6 +173,7 @@ def send_data(con, file_name):
 
             con.send(SOF.encode16())
             con.send(d_send.get_frame())
+            con.send(EOF.encode16())
 
             global timeout
             timeout = False
@@ -190,12 +191,13 @@ def send_data(con, file_name):
 
                 if d_send.confirmed:
                     line = file.read(MAX_DATA)
-                    d_send.prepare_for_new_data()
+                    d_send.prepare_data()
                     break
 
 
 def receive_data(con, file_name):
     id = 1 # id do ultimo quadro de dados recebido
+    
     data = ''
     bef = ''
     loop = 0
@@ -215,35 +217,35 @@ def receive_data(con, file_name):
         checksum_rcv = con.recv(4)
         checksum_rcv = int(checksum_rcv.decode(), base=16)
 
-        try:
-            while (loop == 0):
-                aux = con.recv(2)
-                data += aux
-                while (aux.decode(), base=16) != EOF:
-                    bef = aux
-                    aux = con.recv(2) 
-                    data += aux
+        # try:
+        #     while (loop == 0):
+        #         aux = con.recv(2)
+        #         data += aux
+        #         while ((aux.decode(), base=16) != EOF):
+        #             bef = aux
+        #             aux = con.recv(2) 
+        #             data += aux
                 
-                if(aux.decode(), base=16) == EOF:
-                    if (bef != DLE) # fim de frame
-                        loop = 1
-            d_rcv.decode16(data)
-        except binascii.Error or UnicodeDecodeError:
-            print('Erro de conversão!')
-            continue
+        #         if((aux.decode(), base=16) == EOF):
+        #             if (bef != DLE) # fim de frame
+        #                 loop = 1
+        #     d_rcv.decode16(data)
+        # except binascii.Error or UnicodeDecodeError:
+        #     print('Erro de conversão!')
+        #     continue
 
         # verificando se o checksum está correto
         if d_rcv.checksum() != checksum_rcv:
             print('Erro no Checksum!')
             continue
 
+        # 128 = ACK em decimal
         if d_rcv.flags == 128:
-            # treat received ACK
             if d_rcv.id == d_send.id:
                 # print('ACK recebido!')
                 d_send.confirmed = True
         else:
-            # treat new data
+            # Se não for ACK, então é dados
             expected_id = 1 if id == 0 else 0
             if d_rcv.id != expected_id:
                 # print('Retransmitindo dados e reenviando ACK.')
@@ -252,6 +254,7 @@ def receive_data(con, file_name):
 
                 con.send(SOF.encode())
                 con.send(d_rcv.get_frame())
+                con.send(EOF.encode16())
                 continue
 
             with open(file_name, 'ab') as file:
@@ -262,11 +265,7 @@ def receive_data(con, file_name):
 
                 con.send(SOF.encode())
                 con.send(d_rcv.get_frame())
-
-
-
-
-
+                con.send(EOF.encode16())
 
 
 # main: recebe parametros
