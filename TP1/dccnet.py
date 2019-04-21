@@ -9,11 +9,14 @@ import socket
 import time
 import threading
 import binascii
+import struct
 
 MAX_DATA = 4096 # 512 bytes
 SOF = '0xcc'
 EOF = '0xcd'
 DLE = '0x1b'
+ACK = '0x80'
+DATA = '0x7f'
 
 class Data:
     def __init__(self, data='', id=1, flags=0):
@@ -101,6 +104,8 @@ def initialize_client():
     # Conexão TCP
     connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     connection.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    # Timeout de 1s para envio na conexão
+    connection.setsockopt(socket.SOL_SOCKET, socket.SO_SNDTIMEO, struct.pack('LL', 10, 0)) 
     connection.connect((IP, PORT))
 
     # Threads para enviar e receber (paralelamente)
@@ -135,10 +140,16 @@ def init_server():
         print("Erro ao criar socket!")
         exit(2)
     
-    s.bind((IP, PORT))
-    s.listen(1)
-
-    connection = s.accept()[0]
+    try:
+        s.bind((IP, PORT))
+        s.listen()
+        connection, addr = s.accept()
+        # Timeout de 1s para recebimento na conexão
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVTIMEO, struct.pack('LL', 10, 0))
+    
+    except KeyboardInterrupt:
+        s.close()
+        sys.exit(0)
 
     #Threads para enviar e receber 
     s_thread = threading.Thread(target=send_data, args=(connection, INPUT))
@@ -153,6 +164,36 @@ def init_server():
     1 byte | 1 byte  | 1 byte  | 2 bytes    | max 512 bytes  | 1 byte
 
 '''
+def send_data(con, file_name):
+    with open(file_name, 'rb') as file:
+        line = file.read(MAX_DATA) # lê os 512 bytes maximos
+
+        while line:
+            d_send.data = line
+
+            con.send(SOF.encode16())
+            con.send(d_send.get_frame())
+
+            global timeout
+            timeout = False
+
+            def handle_timeout():
+                global timeout
+                timeout = True
+
+            timer = threading.Timer(1, handle_timeout)
+            timer.start()
+            while True:
+                if timeout:
+                    print('Erro: ACK não foi recebido!')
+                    break
+
+                if d_send.confirmed:
+                    line = file.read(MAX_DATA)
+                    d_send.prepare_for_new_data()
+                    break
+
+
 def receive_data(con, file_name):
     id = 1 # id do ultimo quadro de dados recebido
     data = ''
@@ -175,7 +216,7 @@ def receive_data(con, file_name):
         checksum_rcv = int(checksum_rcv.decode(), base=16)
 
         try:
-            while (loop === 0):
+            while (loop == 0):
                 aux = con.recv(2)
                 data += aux
                 while (aux.decode(), base=16) != EOF:
@@ -224,34 +265,7 @@ def receive_data(con, file_name):
 
 
 
-def send_data(con, file_name):
-    with open(file_name, 'rb') as file:
-        line = file.read(MAX_DATA)
 
-        while line:
-            d_send.data = line
-
-            con.send(SOF.encode())
-            con.send(d_send.get_frame())
-
-            global timeout
-            timeout = False
-
-            def handle_timeout():
-                global timeout
-                timeout = True
-
-            timer = threading.Timer(1, handle_timeout)
-            timer.start()
-            while True:
-                if timeout:
-                    print('Erro: ACK não foi recebido!')
-                    break
-
-                if d_send.confirmed:
-                    line = file.read(MAX_DATA)
-                    d_send.prepare_for_new_data()
-                    break
 
 
 
