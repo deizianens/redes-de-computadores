@@ -1,3 +1,5 @@
+# encoding=utf-8
+
 '''
     DCCNET - Trabalho Prático 1
     Redes de Computadores 2019/01
@@ -11,15 +13,17 @@ import threading
 import binascii
 import struct
 
-MAX_DATA = 4096 # 512 bytes
-SOF = '0xcc'
-EOF = '0xcd'
-DLE = '0x1b'
-ACK = '0x80'
-DATA = '0x7f'
+MAX_DATA = 512 # 512 bytes
+SOF = 'cc'
+EOF = 'cd'
+DLE = '1b'
+ACK = '80'      # 128
+DATA = '7f'     # 127
+
+original_data = b'' # é necessário a mensagem sem byte stuffing para calcular o checksum
 
 class Data:
-    def __init__(self, data='', id=1, flags=0):
+    def __init__(self, data='', id=1, flags=127):
         self.data = data
         self.confirmed = False
         self.id = id
@@ -45,7 +49,7 @@ class Data:
         data += self._format_numbers(self.id, False)
         data += self._format_numbers(self.flags, False)
         data += self._format_numbers(0)
-        data = binascii.unhexlify(data.encode()) + self.data
+        data = binascii.unhexlify(data.encode()) + original_data
 
         checksum = 0
         pointer = 0
@@ -64,8 +68,8 @@ class Data:
         return (~checksum) & 0xFFFF
 
     # encrypt
-    def encode16(self):
-        return binascii.hexlify(self.data)
+    def encode16(self, new_data):
+        return binascii.hexlify(new_data)
 
     # decrypt
     def decode16(self, new_data):
@@ -75,9 +79,9 @@ class Data:
         formatted_id = self._format_numbers(self.id, False)
         formatted_flags = self._format_numbers(self.flags, False)
         formatted_checksum = self._format_numbers(self.checksum())
-        encoded_data = self.encode16()
+        encoded_data = self.encode16(self.data)
         header = (formatted_id + formatted_flags + formatted_checksum).encode()
-        return header + encoded_data
+        return header + encoded_data + EOF.encode() 
 
 
 d_send = Data(id=0)
@@ -95,7 +99,7 @@ timeout = False
         - Nome de um arquivo onde os dados recebidos devem ser armazenados
 
 '''
-def initialize_client():
+def init_client():
     IP = sys.argv[2].split(':')[0]
     PORT = int(sys.argv[2].split(':')[1])
     INPUT = sys.argv[3]
@@ -144,9 +148,9 @@ def init_server():
     
     try:
         s.bind((IP, PORT))
-        s.listen()
+        s.listen(1)
+        print('SERVER na porta ' + str(PORT))
         connection, addr = s.accept()
-    
     except KeyboardInterrupt:
         s.close()
         sys.exit(0)
@@ -165,42 +169,60 @@ def init_server():
 
 '''
 def send_data(con, file_name):
+    cnt = MAX_DATA
+    original_msg = b''
+    msg = b''
+
     with open(file_name, 'rb') as file:
-        line = file.read(MAX_DATA) # lê os 512 bytes maximos
+        line = file.read(1) 
 
-        while line:
-            d_send.data = line
+        # lê os 512 bytes maximos
+        while (cnt > 0 and line):
+            aux = d_send.encode16(line)
+            aux2 = line
+            
+            # caso seja DLE ou EOF, temos que fazer o byte stuffing
+            if aux == DLE or aux == EOF: 
+                msg += DLE
+                cnt -= 1
+            
+            msg += aux
+            original_msg += aux2
+            cnt -= 1 
+            if cnt > 0:
+                line = file.read(1) 
 
-            con.send(SOF.encode16())
-            con.send(d_send.get_frame())
-            con.send(EOF.encode16())
+        d_send.data = msg
+        global original_data
+        original_data = original_msg
+        print('Dados enviados de: ' + file_name)
 
+        con.send(SOF.encode())
+        con.send(d_send.get_frame())
+
+        global timeout
+        timeout = False
+
+        def handle_timeout():
             global timeout
-            timeout = False
+            timeout = True
 
-            def handle_timeout():
-                global timeout
-                timeout = True
+        timer = threading.Timer(1, handle_timeout)
+        timer.start()
+        while True:
+            if timeout:
+                print('Erro: ACK não foi recebido!')
+                break
 
-            timer = threading.Timer(1, handle_timeout)
-            timer.start()
-            while True:
-                if timeout:
-                    print('Erro: ACK não foi recebido!')
-                    break
-
-                if d_send.confirmed:
-                    line = file.read(MAX_DATA)
-                    d_send.prepare_data()
-                    break
+            if d_send.confirmed:
+                line = file.read(MAX_DATA)
+                d_send.prepare_data()
+                break
 
 
 def receive_data(con, file_name):
     id = 1 # id do ultimo quadro de dados recebido
-    
     data = ''
-    bef = ''
-    loop = 0
 
     while True:
         # espera até o recebimento de um SOF
@@ -217,22 +239,30 @@ def receive_data(con, file_name):
         checksum_rcv = con.recv(4)
         checksum_rcv = int(checksum_rcv.decode(), base=16)
 
-        # try:
-        #     while (loop == 0):
-        #         aux = con.recv(2)
-        #         data += aux
-        #         while ((aux.decode(), base=16) != EOF):
-        #             bef = aux
-        #             aux = con.recv(2) 
-        #             data += aux
+        try:
+            if (flags == DATA):
+                aux = con.recv(2)
+                data += aux 
+                while (aux):
+                    if(aux == DLE): # Se houver um escape, pegue o próximo como dado
+                        aux = con.recv(2)
+                        data += aux
+                        aux = con.recv(2)
+                        continue
+
+                    if(aux.decode16() == EOF): # fim de arquivo (sem escape antes)
+                        break
                 
-        #         if((aux.decode(), base=16) == EOF):
-        #             if (bef != DLE) # fim de frame
-        #                 loop = 1
-        #     d_rcv.decode16(data)
-        # except binascii.Error or UnicodeDecodeError:
-        #     print('Erro de conversão!')
-        #     continue
+                    # caso o byte lido não seja EOF nem DLE
+                    aux = con.recv(2)
+                    data += aux
+                    aux = con.recv(2)
+
+                d_rcv.decode16(data) # todos os dados recebidos 
+
+        except binascii.Error or UnicodeDecodeError:
+            print('Erro de conversão!')
+            continue
 
         # verificando se o checksum está correto
         if d_rcv.checksum() != checksum_rcv:
@@ -242,30 +272,29 @@ def receive_data(con, file_name):
         # 128 = ACK em decimal
         if d_rcv.flags == 128:
             if d_rcv.id == d_send.id:
-                # print('ACK recebido!')
+                print('ACK recebido!')
                 d_send.confirmed = True
         else:
             # Se não for ACK, então é dados
             expected_id = 1 if id == 0 else 0
             if d_rcv.id != expected_id:
-                # print('Retransmitindo dados e reenviando ACK.')
+                print('Retransmitindo dados e reenviando ACK.')
                 d_rcv.data = b''
                 d_rcv.flags = 128
 
                 con.send(SOF.encode())
                 con.send(d_rcv.get_frame())
-                con.send(EOF.encode16())
                 continue
 
             with open(file_name, 'ab') as file:
-                file.write(d_rcv.data)
+                file.write(original_data)
+                print('Output em: {}\nEnviando ACK.'.format(file_name))
                 d_rcv.data = b''
                 d_rcv.flags = 128
                 id = d_rcv.id
 
                 con.send(SOF.encode())
                 con.send(d_rcv.get_frame())
-                con.send(EOF.encode16())
 
 
 # main: recebe parametros
