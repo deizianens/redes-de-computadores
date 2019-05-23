@@ -175,7 +175,18 @@ class Router:
         if message['destination'] != self.ip:
             self.send_message(message)
         else:
-            self.send_data(message['source'], json.dumps(message))
+            self.send_data(message['source'], json.dumps(message['hops']))
+    
+    def receive_table(self, message):
+        if message['destination'] != self.ip:
+            self.send_message(message)
+        else:
+            routing_table = self.get_routing_table()
+            payload = [] 
+            for ip in routing_table.keys():
+                    payload.append(tuple((routing_table[ip][0]['ip'], routing_table[ip][0]['next'], routing_table[ip][0]['distance'])))
+                    
+            self.send_data(message['source'], json.dumps(payload))
 
     def receive_data(self, message):
         if message['destination'] == self.ip:
@@ -200,6 +211,15 @@ class Router:
         data_message['payload'] = payload
 
         self.send_message(data_message)
+    
+    def send_table(self, destination):
+        table_message = dict()
+        table_message['type'] = 'table'
+        table_message['source'] = self.ip
+        table_message['destination'] = destination
+
+        self.send_message(table_message)
+
 
     def send_message(self, message):
         routing_table = self.get_routing_table()
@@ -274,7 +294,8 @@ def read_command(read_line):
         router.remove_neighbor(read_line[1])
     elif read_line[0] == 'trace':
         router.send_trace(read_line[1])
-
+    elif read_line[0] == 'table':
+        router.send_table(read_line[1])
 
 def receive_data(connection):
     global router
@@ -288,6 +309,8 @@ def receive_data(connection):
             router.receive_trace(data)
         elif data['type'] == 'data':
             router.receive_data(data)
+        elif data['type'] == 'table':
+            router.receive_table(data)
 
 
 def main():
