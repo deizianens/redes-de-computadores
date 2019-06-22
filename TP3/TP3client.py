@@ -58,43 +58,19 @@ class Message: # Class to represent the client message methods
         msg = struct.pack('>h', 5) + struct.pack('>i', client.seqNum) + struct.pack('>h', len(consult)) 
         msg += str.encode(consult)
 
-        client.sock.send(msg)
+        client.sockets[client.serventId].send(msg)
         client.seqNum += 1
 
-        responses = [] # List to store the responses
         while 1:
             try:
-                client.sock.settimeout(4) # 4 seconds to respond
+                client.sockets['0'].settimeout(4)
+                conn, client_address = client.sockets['0'].accept()
+                client.sockets[client_address] = conn
 
-                responses.append(client.sock.recvfrom(408)) # 2 (message type size) + 4 (sequence number size) + 2 (message size) + 400 (info or key size)
-
-            except socket.timeout: # If the first timeout occurs
-                if len(responses) == 0: # And none response was received, try again
-                    consult = message[2:]
-                    msg = struct.pack('>h', 5) + struct.pack('>i', client.seqNum) + struct.pack('>h', len(consult)) 
-                    msg += str.encode(consult)
-
-                    client.sock.send(msg)
-                    client.seqNum += 1
-
-                    while 1:
-                        try:
-                            client.sock.settimeout(4)
-
-                            responses.append(client.sock.recvfrom(406)) # 2 (message type size) + 4 (sequence number size) + 400 (info or key size)
-
-                        except socket.timeout: # If the second timeout occurs
-                            if len(responses) == 0: # And none response was received
-                                print('Nenhuma resposta recebida.')
-                                return
-
-                            else:
-                                Message.printResponses(struct.pack('>i', client.seqNum-1), responses) # If any response was received, print those
-                                return
-                else:
-                    Message.printResponses(struct.pack('>i', client.seqNum-1), responses) # If any response was received, print those
-                    return
-
+            except socket.timeout: # If timeout occurs
+                print('Nenhuma resposta recebida.')
+                return
+                
     '''
     TOPOREQ
     +---- 2 ---+-- 4 -+
@@ -103,41 +79,17 @@ class Message: # Class to represent the client message methods
     '''
     def sendTopoReq(client): # Method to send a topoReq message to a servent
             msg = struct.pack('>h', 6) + struct.pack('>i', client.seqNum)
-            client.sock.send(msg)
+            client.sockets[client.serventId].send(msg)
             client.seqNum += 1
 
-            responses = [] # List to store the responses
             while 1:
                 try:
-                    client.sock.settimeout(4)
-
-                    responses.append(client.sock.recvfrom(406)) # 2 (message type size) + 4 (sequence number size) + 400 (info or key size)
-
-                except socket.timeout: # If the first timeout occurs
-                    if len(responses) == 0: # And none response was received, try again
-                        datagram = (6).to_bytes(2, 'big') # Message type
-                        datagram += (client.seqNum).to_bytes(4, 'big') # New Sequence Number
-
-                        client.sock.sendto(datagram, (client.serventIp, client.serventPort))
-                        client.seqNum += 1
-
-                        while 1:
-                            try:
-                                client.sock.settimeout(4)
-
-                                responses.append(client.sock.recvfrom(406)) # 2 (message type size) + 4 (sequence number size) + 400 (info or key size)
-
-                            except socket.timeout: # If the second timeout occurs
-                                if len(responses) == 0: # And none response was received
-                                    print('Nenhuma resposta recebida.')
-                                    return
-
-                                else:
-                                    Message.printResponses((client.seqNum-1).to_bytes(4, 'big'), responses) # If any response was received, print those
-                                    return
-                    else:
-                        Message.printResponses((client.seqNum-1).to_bytes(4, 'big'), responses) # If any response was received, print those
-                        return
+                    client.sockets['0'].settimeout(4)
+                    conn, client_address = client.sockets['0'].accept()
+                    client.sockets[client_address] = conn
+                except socket.timeout: # If timeout occurs
+                    print('Nenhuma resposta recebida.')
+                    return
 
     def printResponses(seqNum, responses): # Method to print the response
         for response in responses: # For each response received
