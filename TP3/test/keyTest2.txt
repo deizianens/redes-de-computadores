@@ -1,0 +1,7 @@
+# WELL KNOWN PORT NUMBERS
+#
+rtmp           1/ddp # Routing Table Maintenance Protocol
+tcpmux         1/tcp # TCP Port Service Multiplexer
+#              Mark Lottor <MKL@nisc.sri.com>
+nbp            2/ddp # Name Binding Protocol
+compressnet    2/udp # Management Utility

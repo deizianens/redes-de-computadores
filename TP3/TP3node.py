@@ -63,6 +63,12 @@ class ServentInfo: # Class to represent each servent
         return True
 
 class Message: # Class to represent the servent message methods
+    '''
+    KEYFLOOD, TOPOFLOOD (valor do tipo indica o tipo de mensagem)
+    +---- 2 ------+-- 2 --+--- 4 --+--- 4 ---+----- 2 ----+----------\\-------------------+
+    | TIPO = 7, 8 | TTL | NSEQ | IP_ORIG | PORTO_ORIG | INFO (up to 400 characteres) |
+    +-------------+-------+--------+---------+------------+----------\\-------------------+
+    '''
     def recvKeyReq(servent, clientAddress, recvMsg): # Method to deal with keyReq messages
         keyFloodMsg = (7).to_bytes(2, 'big') # Message type
         keyFloodMsg += (3).to_bytes(2, 'big') # TTL
@@ -104,7 +110,7 @@ class Message: # Class to represent the servent message methods
 
         keyFloodMsg = Message.decrementTTL(recvMsg)
 
-        if Message.TTLIsValid(keyFloodMsg):
+        if Message.TTLIsValid(keyFloodMsg): # if valid TTL, continue, else discard
             Message.sendMessageToServentList(servent, keyFloodMsg)
 
     def recvTopoFlood(servent, recvMsg): # Method to deal with topoFlood messages
@@ -122,7 +128,7 @@ class Message: # Class to represent the servent message methods
 
         topoFloodMsg = Message.decrementTTL(topoFloodMsg)
 
-        if Message.TTLIsValid(topoFloodMsg):
+        if Message.TTLIsValid(topoFloodMsg): # if valid TTL, continue, else discard
             Message.sendMessageToServentList(servent, topoFloodMsg)
 
     def sendRespFromKeyReq(servent, clientAddress, recvMsg): # Method to send the resp message to the client from a keyReq
@@ -139,23 +145,31 @@ class Message: # Class to represent the servent message methods
 
         servent.sock.sendto(newMessage, clientAddress)
 
+    '''
+    RESP
+    +---- 2 ---+-- 4 -+--- 2 ---+----------\\---------------+
+    | TIPO = 9 | NSEQ | TAMANHO | VALOR (up to 400 carateres) |
+    +----------+------+---------+----------\\---------------+
+    '''
     def sendRespFromKeyFlood(servent, recvMsg): # Method to send the resp message to the client from a keyFlood
         clientAddress = Message.clientAddressConstructor(recvMsg)
 
         respMessage = (9).to_bytes(2, 'big') # Message type
         respMessage += recvMsg[4:8] # Sequence Number
-        respMessage += servent.keyDictionary[recvMsg[14:].decode()].encode('ascii') # Key value
+        respMessage += recvMsg[14:16] # Message size
+        respMessage += servent.keyDictionary[recvMsg[16:].decode()].encode('ascii') # Key value
 
-        servent.sock.sendto(respMessage, clientAddress)
+        servent.sock.send(respMessage)
 
     def sendRespFromTopoFlood(servent, topoFloodMsg): # Method to send the resp message to the client from a topoFlood
         clientAddress = Message.clientAddressConstructor(topoFloodMsg)
 
         respMessage = (9).to_bytes(2, 'big') # Message type
         respMessage += topoFloodMsg[4:8] # Sequence Number
-        respMessage += topoFloodMsg[14:] # Actual topology to reach the actual servent
+        respMessage += recvMsg[14:16] # Message size
+        respMessage += topoFloodMsg[16:] # Actual topology to reach the actual servent
 
-        servent.sock.sendto(respMessage, clientAddress)
+        servent.sock.send(respMessage)
 
     def sendMessageToServentList(servent, message): # Method to send the message to all servents in the servent list
         for serv in servent.serventList:
@@ -166,12 +180,12 @@ class Message: # Class to represent the servent message methods
 
         return ('127.0.0.1', clientPort)
 
-    def decrementTTL(message): # Method to decrement the TTL and return the new message datagram
+    def decrementTTL(message): # Method to decrement the TTL and return the new message 
         ttlValue = int.from_bytes(message[2:4], 'big') # TTL value
         ttlValue -= 1
         newMessage = message[0:2] # Message type
         newMessage += ttlValue.to_bytes(2, 'big') # New TTL value
-        newMessage += message[4:] # Rest of the datagram
+        newMessage += message[4:] # Rest of the message
 
         return newMessage
 
@@ -182,7 +196,9 @@ class Message: # Class to represent the servent message methods
 servent = ServentInfo() # Creates the servent object
 
 while 1:
-    recvMsg, recvAddress = servent.sock.recvfrom(414) # 2 (message type size) + 2 (TTL size) + 4 (sequence number size) + 4 (IP origin size) + 2 (port origin size) + 400 (info or key size)
+   
+    # 2 (message type size) + 2 (TTL size) + 4 (sequence number size) + 4 (IP origin size) + 2 (port origin size) + 400 (info or key size)
+    recvMsg, recvAddress = servent.sock.recvfrom(414) 
 
     if recvMsg[0:2] == (5).to_bytes(2, 'big'):
         Message.recvKeyReq(servent, recvAddress, recvMsg)

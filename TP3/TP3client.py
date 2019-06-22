@@ -8,7 +8,7 @@ import struct
 
 class Client: # Class to represent each client
     def __init__(self):
-        self.port = int(sys.argv[1])
+        self.port = sys.argv[1]
         self.serventIp, self.serventPort = sys.argv[2].split(':') # Gets the servent ip and port from the command line argument
         self.serventPort = int(self.serventPort) # Casts the port to be a int
         self.seqNum = 0 
@@ -19,7 +19,7 @@ class Client: # Class to represent each client
     def createSockets(self):
         try:
             client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # TCP socket creation
-            client_sock.bind(("", self.port))
+            client_sock.bind(("", int(self.port)))
             client_sock.listen()
 
             self.sockets['0'] = client_sock
@@ -29,23 +29,24 @@ class Client: # Class to represent each client
 
         try:
             servent_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # TCP socket creation
-            servent_sock.connect(self.serventIp, self.serventPort)
-            servent_sock.listen()
-
+            servent_sock.connect((self.serventIp, self.serventPort))
+            
             self.sockets['0'] = servent_sock
             '''
             ID
             +---- 2 ---+--- 2 ---------------------------+
             | TIPO = 4 | PORTO (ou zero se for servent) |
             +----------+---------------------------------+
-            '''
-            msg = struct.pack('>h', 4) + struct.pack('>h', int(self.port))   # ID message to identify as servent or client (servent = 0, client = port)
+            '''            
+            msg = struct.pack('>h', 4) + struct.pack('>H', int(self.port))   # ID message to identify as servent or client (servent = 0, client = port)
+            print('msg')            
+
             servent_sock.send(msg)
             self.sockets[self.serventIp]  = servent_sock
 
         except:
             print("Erro de conexão (2).")
-            sys.exit()
+            sys.exit(1)
 
 class Message: # Class to represent the client message methods
     '''
@@ -58,7 +59,7 @@ class Message: # Class to represent the client message methods
         msg = struct.pack('>h', 5) + struct.pack('>i', client.seqNum) + struct.pack('>h', len(consult)) 
         msg += str.encode(consult)
 
-        client.sockets[client.serventId].send(msg)
+        client.sockets[client.serventIp].send(msg)
         client.seqNum += 1
 
         while 1:
@@ -79,7 +80,7 @@ class Message: # Class to represent the client message methods
     '''
     def sendTopoReq(client): # Method to send a topoReq message to a servent
             msg = struct.pack('>h', 6) + struct.pack('>i', client.seqNum)
-            client.sockets[client.serventId].send(msg)
+            client.sockets[client.serventIp].send(msg)
             client.seqNum += 1
 
             while 1:
@@ -116,7 +117,8 @@ while 1:
         Message.sendTopoReq(client)
 
     elif message[0].upper() == 'Q':
-        client.sock.close() # Close the client socket
+        for con in client.sockets:
+                client.sockets[con].close() 
         print('Socket do client finalizado com sucesso.')
         break
 
