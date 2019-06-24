@@ -9,6 +9,7 @@ import struct
 class Client: # Class to represent each client
     def __init__(self):
         self.port = sys.argv[1]
+        self.ipPort = sys.argv[2]
         self.serventIp, self.serventPort = sys.argv[2].split(':') # Gets the servent ip and port from the command line argument
         self.serventPort = int(self.serventPort) # Casts the port to be a int
         self.seqNum = 0 
@@ -42,7 +43,7 @@ class Client: # Class to represent each client
             print('msg')            
 
             servent_sock.send(msg)
-            self.sockets[self.serventIp]  = servent_sock
+            self.sockets[self.ipPort]  = servent_sock
 
         except:
             print("Erro de conexão (2).")
@@ -59,7 +60,7 @@ class Message: # Class to represent the client message methods
         msg = struct.pack('>h', 5) + struct.pack('>i', client.seqNum) + struct.pack('>h', len(consult)) 
         msg += str.encode(consult)
 
-        client.sockets[client.serventIp].send(msg)
+        client.sockets[client.ipPort].send(msg)
         client.seqNum += 1
 
         while 1:
