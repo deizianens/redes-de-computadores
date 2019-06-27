@@ -24,8 +24,8 @@ class Client: # Class to represent each client
             client_sock.listen()
 
             self.sockets['0'] = client_sock
-        except:
-            print("Erro de conexão (1).")
+        except socket.error as e:
+            print("Erro de conexão (1). ", e)
             sys.exit()
 
         try:
@@ -43,8 +43,8 @@ class Client: # Class to represent each client
 
             self.sockets[self.ipPort]  = servent_sock
 
-        except:
-            print("Erro de conexão (2).")
+        except socket.error as e:
+            print("Erro de conexão (2). ", e)
             sys.exit(1)
 
 class Message: # Class to represent the client message methods
@@ -67,7 +67,7 @@ class Message: # Class to represent the client message methods
                 # client.sockets['0'].listen()
                 conn, client_address = client.sockets['0'].accept()
                 client.sockets[client_address] = conn
-                received_messages(conn, client_address, client.seqNum)
+                Message.received_messages(conn, client_address, client.seqNum)
 
             except socket.timeout: # If timeout occurs
                 print('Nenhuma resposta recebida.')
@@ -90,22 +90,22 @@ class Message: # Class to represent the client message methods
                     # client.sockets['0'].listen()
                     conn, client_address = client.sockets['0'].accept()
                     client.sockets[client_address] = conn
-                    received_messages(conn, client_address, client.seqNum)
+                    Message.received_messages(conn, client_address, client.seqNum)
 
                 except socket.timeout: # If timeout occurs
                     print('Nenhuma resposta recebida.')
                     return
 
-
     def received_messages(conn, addr, nseq):
-        msg_type = struct.unpack("!H", con.recv(2))[0]
-        msg_nseq = struct.unpack("!I", con.recv(4))[0]
+        msg_type = struct.unpack("!H", conn.recv(2))[0]
+        msg_nseq = struct.unpack("!I", conn.recv(4))[0]
 
         (src_ip, src_port) = (addr[0], addr[1])
 
-        msg_size = struct.unpack("@H", con.recv(2))[0]
-        msg_value = con.recv(msg_size)
+        msg_size = struct.unpack("@H", conn.recv(2))[0]
+        msg_value = conn.recv(msg_size)
         print(msg_value.decode('ascii') + " " + str(src_ip) + ":" + str(src_port))
+
 
 client = Client() # Creates the object to represent the client
 client.createSockets() # sockets to comunicate

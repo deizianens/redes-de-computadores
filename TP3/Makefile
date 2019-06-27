@@ -1,11 +1,11 @@
 client1:
-	python3 TP3client.py 55555 127.0.0.1:55555
+	python3 TP3client.py 5554 127.0.0.1:5555
 
 client2:
-	python3 TP3client.py 55501 127.0.0.1:55557
+	python3 TP3client.py 9095 127.0.0.1:9094
 
 servent1:
-	python3 TP3node.py 55555 ./test/keyTest1.txt [127.0.0.1:55554]
+	python3 TP3node.py 5555 ./test/keyTest1.txt [127.0.0.1:5554]
 
 servent2:
 	python3 TP3node.py 55554 ./test/keyTest2.txt [127.0.0.1:55555[127.0.0.1:55556[127.0.0.1:55557]]]
