@@ -32,17 +32,15 @@ class Client: # Class to represent each client
             servent_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # TCP socket creation
             servent_sock.connect((self.serventIp, self.serventPort))
             
-            self.sockets['0'] = servent_sock
             '''
             ID
             +---- 2 ---+--- 2 ---------------------------+
             | TIPO = 4 | PORTO (ou zero se for servent) |
             +----------+---------------------------------+
-            '''            
-            msg = struct.pack('>h', 4) + struct.pack('>H', int(self.port))   # ID message to identify as servent or client (servent = 0, client = port)
-            print('msg')            
-
+            '''    
+            msg = struct.pack('!H', 4) + struct.pack('!H', int(self.port))   # ID message to identify as servent or client (servent = 0, client = port)
             servent_sock.send(msg)
+
             self.sockets[self.ipPort]  = servent_sock
 
         except:
@@ -57,8 +55,8 @@ class Message: # Class to represent the client message methods
     '''
     def sendKeyReq(client, message): # Method to send a keyReq message to a servent
         consult = message[2:]
-        msg = struct.pack('>h', 5) + struct.pack('>i', client.seqNum) + struct.pack('>h', len(consult)) 
-        msg += str.encode(consult)
+        msg = struct.pack('!H', 5) + struct.pack('!I', client.seqNum) + struct.pack('@H', len(consult)) 
+        msg += consult.encode('ascii')
 
         client.sockets[client.ipPort].send(msg)
         client.seqNum += 1
@@ -66,8 +64,10 @@ class Message: # Class to represent the client message methods
         while 1:
             try:
                 client.sockets['0'].settimeout(4)
+                # client.sockets['0'].listen()
                 conn, client_address = client.sockets['0'].accept()
                 client.sockets[client_address] = conn
+                received_messages(conn, client_address, client.seqNum)
 
             except socket.timeout: # If timeout occurs
                 print('Nenhuma resposta recebida.')
@@ -80,27 +80,32 @@ class Message: # Class to represent the client message methods
     +----------+------+
     '''
     def sendTopoReq(client): # Method to send a topoReq message to a servent
-            msg = struct.pack('>h', 6) + struct.pack('>i', client.seqNum)
-            client.sockets[client.serventIp].send(msg)
+            msg = struct.pack('!H', 6) + struct.pack('!I', client.seqNum)
+            client.sockets[client.ipPort].send(msg)
             client.seqNum += 1
 
             while 1:
                 try:
                     client.sockets['0'].settimeout(4)
+                    # client.sockets['0'].listen()
                     conn, client_address = client.sockets['0'].accept()
                     client.sockets[client_address] = conn
+                    received_messages(conn, client_address, client.seqNum)
+
                 except socket.timeout: # If timeout occurs
                     print('Nenhuma resposta recebida.')
                     return
 
-    def printResponses(seqNum, responses): # Method to print the response
-        for response in responses: # For each response received
-            if response[0][2:6] == seqNum: # If the sequence number of the received message is the expected sequence number
-                print((response[0][6:]).decode(), ' ', response[1][0], ':', response[1][1], sep='')
 
-            else:
-                print('Mensagem incorreta recebida de ', response[1][0], ':', response[1][1], sep='')
+    def received_messages(conn, addr, nseq):
+        msg_type = struct.unpack("!H", con.recv(2))[0]
+        msg_nseq = struct.unpack("!I", con.recv(4))[0]
 
+        (src_ip, src_port) = (addr[0], addr[1])
+
+        msg_size = struct.unpack("@H", con.recv(2))[0]
+        msg_value = con.recv(msg_size)
+        print(msg_value.decode('ascii') + " " + str(src_ip) + ":" + str(src_port))
 
 client = Client() # Creates the object to represent the client
 client.createSockets() # sockets to comunicate
