@@ -92,8 +92,10 @@ class Message:  # Class to represent the servent message methods
     def recvKeyReq(servent, key, num_seq, porto_orig, current_socket):  # Method to deal with keyReq messages
         # If this servent has the key in his keyDictionary, send a resp to the client
         if key in servent.keyDictionary.keys():
+            print("Servent possui a chave. Enviando resposta para cliente no porto "+str(porto_orig))
             Message.sendResp(servent, num_seq, servent.keyDictionary[key], servent.ip, porto_orig)
         else:
+            print("Servent não possui a chave. Iniciando alagamento.")
             keyFloodMsg = struct.pack("!H", 7)  # Message type
             keyFloodMsg += struct.pack("!H", 3)  # TTL
             keyFloodMsg += struct.pack("!I", num_seq)  # Sequence Number
@@ -110,6 +112,7 @@ class Message:  # Class to represent the servent message methods
 
 
     def recvTopoReq(servent, num_seq, porto_orig, current_socket):  # Method to deal with topoReq messages
+        print("Requisição de topologia recebida. Iniciando alagamento.")
         info = servent.ip + ":" + str(servent.port)        
         Message.sendResp(servent, num_seq, info, servent.ip, porto_orig)
         
@@ -203,6 +206,7 @@ class Message:  # Class to represent the servent message methods
                 continue
 
             if servent.neighbors[neighbor] == 0 and neighbor is not current_socket:
+                print("Enviando mensagem de alagamento para "+str(servent.sockets[neighbor].getpeername()))
                 servent.sockets[neighbor].send(message)
 
     # Method to construct the client address to auxiliate the resp message methods
@@ -211,14 +215,6 @@ class Message:  # Class to represent the servent message methods
 
         return ('127.0.0.1', clientPort)
 
-    def decrementTTL(message):  # Method to decrement the TTL and return the new message
-        ttlValue = int.from_bytes(message[2:4], 'big')  # TTL value
-        ttlValue -= 1
-        newMessage = message[0:2]  # Message type
-        newMessage += ttlValue.to_bytes(2, 'big')  # New TTL value
-        newMessage += message[4:]  # Rest of the message
-
-        return newMessage
 
     def TTLIsValid(message):  # Method to verify the TTL value
         return True if int.from_bytes(message[2:4], 'big') > 0 else False
@@ -247,6 +243,7 @@ while (servent.sockets):
                 +----------+---------------------------------+
                 '''
                 if (recv_msg == 4): #ID message
+                    print("Recebeu ID em "+str(current_socket.getpeername()))
                     recv_port = struct.unpack("!H", current_socket.recv(2))[0]
                     servent.neighbors[current_socket.getpeername()] = recv_port
              
@@ -308,7 +305,7 @@ while (servent.sockets):
                     size = struct.unpack('!H', current_socket.recv(2))[0]    
                     info = current_socket.recv(size).decode('ascii')
 
-                    Message.recvTopoFlood(servent, recv_msg, ttl, nseq, ip_orig, porto_orig, size, info, current_socket)
+                    Message.recvTopoFlood(servent, ttl, nseq, ip_orig, porto_orig, size, info, current_socket)
 
     except KeyboardInterrupt:
         raise KeyboardInterrupt

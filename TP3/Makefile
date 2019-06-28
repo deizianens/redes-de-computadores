@@ -28,9 +28,13 @@ servent7:
 servent8:
 	python3 TP3node.py 55561 ./test/keyTest.txt [127.0.0.1:55560]
 	
-	
+
+python3 TP3client.py 9089 127.0.0.1:9090
 python3 TP3node.py 9090 ./test/keyTest.txt 
 python3 TP3node.py 9091 ./test/keyTest1.txt 127.0.0.1:9090
 python3 TP3node.py 9093 ./test/keyTest1.txt 127.0.0.1:9091
 python3 TP3node.py 9094 ./test/keyTest1.txt 127.0.0.1:9093
-python3 TP3node.py 9095 ./test/keyTest1.txt 127.0.0.1:9094
+
+python3 TP3client.py 9095 127.0.0.1:9094
+python3 TP3node.py 9094 ./test/keyTest.txt 
+python3 TP3node.py 9092 ./test/keyTest.txt 127.0.0.1:9094
