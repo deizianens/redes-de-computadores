@@ -51,7 +51,7 @@ class Servent:  # Class to represent each servent
                 key = key.split()
                 # Save the key and the value in the key Dictionary
                 self.keyDictionary[key[0]] = str.join(' ', (key[1:]))
-
+                # print(self.keyDictionary)
       
 
     # Method to construct the servent list
@@ -90,26 +90,25 @@ class Message:  # Class to represent the servent message methods
     +-------------+-----+------+---------+------------+---------+----------\\--------------+
 
     '''
-    def recvKeyReq(servent, num_seq, porto_orig, size, key, current_socket):  # Method to deal with keyReq messages
-        keyFloodMsg = struct.pack("!H", 7)  # Message type
-        keyFloodMsg += struct.pack("!H", 3)  # TTL
-        
-        keyFloodMsg += struct.pack("!I", num_seq)  # Sequence Number
+    def recvKeyReq(servent, key, num_seq, porto_orig, current_socket):  # Method to deal with keyReq messages
+        # If this servent has the key in his keyDictionary, send a resp to the client
+        if key in servent.keyDictionary.keys():
+            Message.sendResp(servent, num_seq, servent.keyDictionary[key], servent.ip, porto_orig)
+        else:
+            keyFloodMsg = struct.pack("!H", 7)  # Message type
+            keyFloodMsg += struct.pack("!H", 3)  # TTL
+            keyFloodMsg += struct.pack("!I", num_seq)  # Sequence Number
 
-        src_ip = servent.ip.split(".")
-        for i in range(0,4):
-            keyFloodMsg += struct.pack("!b", int(src_ip[i]))
+            src_ip = servent.ip.split(".")
+            for i in range(0,4):
+                keyFloodMsg += struct.pack("!b", int(src_ip[i]))
 
-        keyFloodMsg += struct.pack("!H", porto_orig)  # Client port
-        keyFloodMsg += struct.pack("@H", size) # message size
-        keyFloodMsg += key.encode('ascii')
+            keyFloodMsg += struct.pack("!H", porto_orig)  # Client port
+            keyFloodMsg += struct.pack("@H", len(key)) # message size
+            keyFloodMsg += key.encode('ascii')
 
-        if servent.checkMessageIsNew(keyFloodMsg):
-            # If this servent has the key in his keyDictionary, send a resp to the client
-            if key.decode() in servent.keyDictionary:
-                Message.sendResp(servent, num_seq, servent.keyDictionary[key[0]], ip_orig, porto_orig)
+            Message.sendMessageToServentList(servent, keyFloodMsg, current_socket)
 
-            Message.sendMessageToServentList(servent, keyFloodMsg)
 
     def recvTopoReq(servent, num_seq, porto_orig, current_socket):  # Method to deal with topoReq messages
         topoFloodMsg = struct.pack("!H", 8)  # Message type
@@ -182,11 +181,10 @@ class Message:  # Class to represent the servent message methods
     '''
     # Method to send the resp message to the client from a keyReq
     def sendResp(servent, nseq, value, ip, port):
-        newMessage = (9).to_bytes(2, 'big')  # Message type
-        newMessage += (nseq).to_bytes(2, 'big')  # Sequence Number
-        newMessage += (len(value)).to_bytes(2, 'big')  # Message size
-        # Key values
-        newMessage += str.encode(value)
+        newMessage = struct.pack("!H", 9)  # Message type
+        newMessage += struct.pack("!I", nseq)  # Sequence Number
+        newMessage += struct.pack("@H", len(value))  # Message size
+        newMessage += value.encode('ascii')
 
         try:
             s = socket.socket(socket.AF_INET , socket.SOCK_STREAM)
@@ -198,9 +196,13 @@ class Message:  # Class to represent the servent message methods
             print("Falha ao enviar na porta recebida." , (ip, port) , e )
 
     # Method to send the message to all servents in the servent list
-    def sendMessageToServentList(servent, message):
-        for serv in servent.serventList:
-            servent.sock.send(message)
+    def sendMessageToServentList(servent, message, current_socket):
+        for neighbor in servent.sockets:
+            if neighbor == '0': # dont send to servent or who sent me
+                continue
+
+            if servent.neighbors[neighbor] == 0 and neighbor is not current_socket:
+                servent.sockets[neighbor].send(message)
 
     # Method to construct the client address to auxiliate the resp message methods
     def clientAddressConstructor(message):
@@ -258,7 +260,7 @@ while (servent.sockets):
                     size = struct.unpack("@H", current_socket.recv(2))[0]
                     key = current_socket.recv(size).decode('ascii')
 
-                    Message.recvKeyReq(servent, num_seq, servent.neighbors[current_socket.getpeername()], size, key, current_socket)
+                    Message.recvKeyReq(servent, key, num_seq, servent.neighbors[current_socket.getpeername()], current_socket)
 
                 elif (recv_msg == 6): #TOPOREQ
                     '''
