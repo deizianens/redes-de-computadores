@@ -92,6 +92,7 @@ class Message:  # Class to represent the servent message methods
     '''
     def recvKeyReq(servent, key, num_seq, porto_orig, current_socket):  # Method to deal with keyReq messages
         # If this servent has the key in his keyDictionary, send a resp to the client
+        print(key)
         if key in servent.keyDictionary.keys():
             Message.sendResp(servent, num_seq, servent.keyDictionary[key], servent.ip, porto_orig)
         else:
@@ -185,7 +186,7 @@ class Message:  # Class to represent the servent message methods
         newMessage += struct.pack("!I", nseq)  # Sequence Number
         newMessage += struct.pack("@H", len(value))  # Message size
         newMessage += value.encode('ascii')
-
+        print('enviando resposta')
         try:
             s = socket.socket(socket.AF_INET , socket.SOCK_STREAM)
             s.connect((ip, port))
@@ -257,7 +258,7 @@ while (servent.sockets):
                     +----------+------+---------+----------\\---------------+
                     '''
                     num_seq = struct.unpack("!I", current_socket.recv(4))[0]
-                    size = struct.unpack("@H", current_socket.recv(2))[0]
+                    size = struct.unpack("!H", current_socket.recv(2))[0]
                     key = current_socket.recv(size).decode('ascii')
 
                     Message.recvKeyReq(servent, key, num_seq, servent.neighbors[current_socket.getpeername()], current_socket)

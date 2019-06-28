@@ -54,7 +54,7 @@ class Message: # Class to represent the client message methods
     +----------+------+---------+----------\\---------------+
     '''
     def sendKeyReq(client, message): # Method to send a keyReq message to a servent
-        consult = message[2:]
+        consult = message
         msg = struct.pack('!H', 5) + struct.pack('!I', client.seqNum) + struct.pack('@H', len(consult)) 
         msg += consult.encode('ascii')
 
