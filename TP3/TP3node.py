@@ -29,7 +29,7 @@ class Servent:
                 line = f.readline()
                 while line:
                     if(line[0] != "#"):
-                        self.keyDictionary[ line.split(" ")[0] ] =  " ".join( line.split(" ")[1:]).replace('\n','')
+                        self.keyDictionary[ line.split(" ")[0]] =  " ".join(line.split(" ")[1:]).replace('\n','')
                     line = f.readline()
 
         except AttributeError:
@@ -83,16 +83,15 @@ class Message:  # Class to represent the servent message methods
         # +---- 2 ---+-- 4 -+--- 2 ---+----------\\---------------+
         # | TIPO = 9 | NSEQ | TAMANHO | VALOR (at´e 400 carateres) |
         # +----------+------+---------+----------\\---------------+
-        messageRESP = struct.pack('>h', 9) + struct.pack('>i', nseq) + struct.pack('>h', len(data)) 
-        messageRESP += str.encode( data )
+        resp = struct.pack('>h', 9) + struct.pack('>i', nseq) + struct.pack('>h', len(data)) 
+        resp += str.encode(data)
 
         # Temporary connection to send the message.
         try:
-            tempSocket = socket.socket(socket.AF_INET , socket.SOCK_STREAM)
-            tempSocket.connect( ( ip, port ) )
-            tempSocket.send( messageRESP )
+            tempSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            tempSocket.connect(( ip, port ))
+            tempSocket.send(resp)
             tempSocket.close()
-            #print("Dado enviado: " , data)
         except socket.error as e:
             print("Falha ao enviar na porta recebida." , (ip, port) , e )
 
@@ -109,17 +108,17 @@ class Message:  # Class to represent the servent message methods
             return
 
         # Used for treat repeat flooding
-        servent.receivedMessagesList.append( (ip_orig,porto_orig,nseq) )
+        servent.receivedMessagesList.append((ip_orig,porto_orig,nseq))
 
         # If my db has this key, send this value to client:
         if( (tipo == 5 or tipo == 7) and info in servent.keyDictionary.keys()):
             # data = db value , ip = ip of sender , port = port that client gave me , nseq = came inside the package
-            Message.sendResp(nseq ,  servent.keyDictionary[info] , ip_orig , porto_orig )
+            Message.sendResp(nseq, servent.keyDictionary[info], ip_orig, porto_orig)
 
         # Topo requests add the own address and send to the client
         if( tipo == 6 or tipo == 8):
-            info += str( socket.gethostbyname(socket.getfqdn())) + ":" + str(servent.port) + " "  
-            tamanho += len( str( socket.gethostbyname(socket.getfqdn()) ) + ":" + str(servent.port) + " "   )
+            info += str(socket.gethostbyname(socket.getfqdn())) + ":" + str(servent.port) + " "  
+            tamanho += len(str(socket.gethostbyname(socket.getfqdn())) + ":" + str(servent.port) + " ")
             Message.sendResp(nseq , info , ip_orig , porto_orig)
 
         # Flooding data
@@ -137,7 +136,7 @@ class Message:  # Class to represent the servent message methods
                 continue
 
             if servent.neighborsPort[neighbor] == 0 and neighbor != origin :
-                servent.sockets[ neighbor ].send(message)
+                servent.sockets[neighbor].send(message)
                 
 
 servent = Servent()  # Creates the servent object
@@ -155,7 +154,7 @@ try:
             else:
                 data = current_socket.recv(2)
                 if data: 
-                        valueType = struct.unpack('>h', data)[0] 
+                        option = struct.unpack('>h', data)[0] 
                             
                         '''
                         ID  
@@ -163,53 +162,57 @@ try:
                         | TIPO = 4 | PORTO (ou zero se for servent) |
                         +----------+---------------------------------+
                         '''
-                        if(valueType == 4): #ID message
+                        if(option == 4): #ID message
                             recv_port = struct.unpack('>h', current_socket.recv(2) )[0]
                             servent.neighborsPort[ current_socket.getpeername() ] = recv_port
 
-                        # KEYREQ
-                        elif(valueType == 5 ):
-                                nseq = struct.unpack('>i', current_socket.recv(4) )[0] # unpack: > big-endian , i integer - 4 bytes
-                                tamanho = struct.unpack('>h' , current_socket.recv(2))[0] # unpack: > big-endian , h short integer - 2 bytes
+                        
+                        elif(option == 5 ):
+                            '''
+                            KEYREQ
+                            +---- 2 ---+-- 4 -+--- 2 ---+----------\\---------------+
+                            | TIPO = 5 | NSEQ | TAMANHO | CHAVE (até 400 carateres) |
+                            +----------+------+---------+----------\\---------------+
+                            '''
+                            nseq = struct.unpack('>i', current_socket.recv(4) )[0] 
+                            tamanho = struct.unpack('>h' , current_socket.recv(2))[0] 
                                 
-                                searchedKey = ""
-                                i=0
-                                while( i < tamanho):
-                                    searchedKey += bytes.decode( current_socket.recv(1) )
-                                    i+=1
+                            key_ = ""
+                            for _ in range(tamanho):
+                                key_ += bytes.decode(current_socket.recv(1))
 
-                                #print("começando a floodar, recebido de:" , sock.getpeername())
-                                # Mounting KEYFLOOD MESSAGE 
-                                Message.createFloodMessage(servent, 7,4,nseq,current_socket.getpeername()[0], servent.neighborsPort[ current_socket.getpeername() ], len(searchedKey) , searchedKey, current_socket.getpeername())
+                            Message.createFloodMessage(servent, 7, 4, nseq, current_socket.getpeername()[0], servent.neighborsPort[current_socket.getpeername()], len(key_) , key_, current_socket.getpeername())
 
-                        # TOPOREQ - requests the network topology
-                        elif(valueType == 6):
-                                nseq = struct.unpack('>i', current_socket.recv(4) )[0] # unpack: > big-endian , i integer - 4 bytes
-                                # Mounting KEYFLOOD MESSAGE 
-                                Message.createFloodMessage(servent, 8,4,nseq,current_socket.getpeername()[0] , servent.neighborsPort[current_socket.getpeername()],0,"", current_socket.getpeername() )
+                        elif(option == 6):
+                            '''
+                            +---- 2 ---+-- 4 -+
+                            | TIPO = 6 | NSEQ |
+                            +----------+------+
+                            '''
+                            nseq = struct.unpack('>i', current_socket.recv(4) )[0] 
+                                
+                            Message.createFloodMessage(servent, 8, 4, nseq, current_socket.getpeername()[0], servent.neighborsPort[current_socket.getpeername()], 0, "", current_socket.getpeername())
                             
-                        # KEYFLOOD - receives a package, treats and spreads
-                        elif(valueType == 7 or valueType == 8):
-                                ttl = struct.unpack('>h', current_socket.recv(2) )[0]        # unpack: > big-endian , h short integer - 2 bytes
-                                nseq = struct.unpack('>i', current_socket.recv(4) )[0]       # unpack: > big-endian , i integer - 4 bytes
-                                ip_orig = socket.inet_ntoa( current_socket.recv(4) )         # Convert a 32-bit packed IPv4 address (a string four characters in length) to its standard dotted-quad string
-                                porto_orig = struct.unpack('>h', current_socket.recv(2) )[0] # unpack: > big-endian , h short integer - 2 bytes
-                                tamanho = struct.unpack('>h', current_socket.recv(2) )[0]    # unpack: > big-endian , h short integer - 2 bytes
+                        elif(option == 7 or option == 8):
+                            '''
+                            +---- 2 ------+- 2 -+-- 4 -+--- 4 ---+----- 2 ----+--- 2 ---+----------\\--------------+
+                            | TIPO = 7, 8 | TTL | NSEQ | IP_ORIG | PORTO_ORIG | TAMANHO | INFO (at´e 400 carateres) |
+                            +-------------+-----+------+---------+------------+---------+----------\\--------------+
+                            '''
+                            ttl = struct.unpack('>h', current_socket.recv(2) )[0]        
+                            nseq = struct.unpack('>i', current_socket.recv(4) )[0]       
+                            ip_orig = socket.inet_ntoa( current_socket.recv(4) )         
+                            porto_orig = struct.unpack('>h', current_socket.recv(2) )[0] 
+                            tamanho = struct.unpack('>h', current_socket.recv(2) )[0]    
                                 
-                                info = ""
-                                i=0
-                                while( i < tamanho):
-                                    info += bytes.decode( current_socket.recv(1) )
-                                    i+=1
-
-                                # Mounting KEYFLOOD MESSAGE 
-                                Message.createFloodMessage(servent, valueType,ttl,nseq,ip_orig,porto_orig,len(info),info , current_socket.getpeername())
+                            info = ""
+                            for _ in range(tamanho):
+                                info += bytes.decode(current_socket.recv(1))
+                                
+                            Message.createFloodMessage(servent, option, ttl, nseq, ip_orig, porto_orig, len(info), info, current_socket.getpeername())
                 else:
-                            # Interpret empty result as closed connection
-                            #print ('Fechando conexão com ', sock.getpeername(), ', pois o outro lado já está fechado.')
-                            # Stop listening for input on the connection
-                            del servent.sockets[current_socket.getpeername()]
-                            current_socket.close()
+                    del servent.sockets[current_socket.getpeername()]
+                    current_socket.close()
 except KeyboardInterrupt:
             raise KeyboardInterrupt
 
