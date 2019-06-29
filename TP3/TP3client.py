@@ -5,30 +5,32 @@ e exibirá os resultados que forem recebidos para as consultas.
 import sys
 import socket
 import struct
-import select
 
 class Client: # Class to represent each client
     def __init__(self):
         self.port = sys.argv[1]
         self.ipPort = sys.argv[2]
-        self.serventIp, self.serventPort = sys.argv[2].split(':') # Gets the servent ip and port from the input_ line argument
+        self.serventIp, self.serventPort = sys.argv[2].split(':') # Gets the servent ip and port from the command line argument
         self.serventPort = int(self.serventPort) # Casts the port to be a int
         self.seqNum = 0 
-        self.createSockets()
+        self.sockets = {}
+        self.sockets['stdin'] = sys.stdin
+        
 
     def createSockets(self):
         try:
-            self.client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # TCP socket creation
-            self.client_sock.bind(("", int(self.port)))
-            # self.client_sock.listen()
+            client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # TCP socket creation
+            client_sock.bind(("", int(self.port)))
+            client_sock.listen()
 
+            self.sockets['0'] = client_sock
         except socket.error as e:
             print("Erro de conexão (1). ", e)
             sys.exit()
 
         try:
-            self.servent_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # TCP socket creation
-            self.servent_sock.connect((self.serventIp, self.serventPort))
+            servent_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # TCP socket creation
+            servent_sock.connect((self.serventIp, self.serventPort))
             
             '''
             ID
@@ -37,7 +39,9 @@ class Client: # Class to represent each client
             +----------+---------------------------------+
             '''    
             msg = struct.pack('!H', 4) + struct.pack('!H', int(self.port))   # ID message to identify as servent or client (servent = 0, client = port)
-            self.servent_sock.send(msg)
+            servent_sock.send(msg)
+
+            self.sockets[self.ipPort]  = servent_sock
 
         except socket.error as e:
             print("Erro de conexão (2). ", e)
@@ -54,19 +58,19 @@ class Message: # Class to represent the client message methods
         msg = struct.pack('!H', 5) + struct.pack('!I', client.seqNum) + struct.pack('@H', len(consult)) 
         msg += consult.encode('ascii')
 
-        client.servent_sock.send(msg)
+        client.sockets[client.ipPort].send(msg)
         client.seqNum += 1
-        
+
         while 1:
             try:
-                client.client_sock.settimeout(4)
-                client.client_sock.listen()
-                conn, client_address = client.client_sock.accept()
-                ans = Message.received_messages(conn, client.seqNum)
+                client.sockets['0'].settimeout(4)
+                # client.sockets['0'].listen()
+                conn, client_address = client.sockets['0'].accept()
+                client.sockets[client_address] = conn
+                Message.received_messages(conn, client_address, client.seqNum)
 
             except socket.timeout: # If timeout occurs
-                if not ans:
-                    print('Nenhuma resposta recebida.')
+                print('Nenhuma resposta recebida.')
                 return
                 
     '''
@@ -77,45 +81,30 @@ class Message: # Class to represent the client message methods
     '''
     def sendTopoReq(client): # Method to send a topoReq message to a servent
             msg = struct.pack('!H', 6) + struct.pack('!I', client.seqNum)
-            client.servent_sock.send(msg)
-            client.seqNum += 1            
-            
+            client.sockets[client.ipPort].send(msg)
+            client.seqNum += 1
+
             while 1:
                 try:
-                    client.client_sock.settimeout(4)
-                    client.client_sock.listen()
-                    conn, client_address = client.client_sock.accept()
-                    ans = Message.received_messages(conn, client.seqNum)
+                    client.sockets['0'].settimeout(4)
+                    # client.sockets['0'].listen()
+                    conn, client_address = client.sockets['0'].accept()
+                    client.sockets[client_address] = conn
+                    Message.received_messages(conn, client_address, client.seqNum)
 
                 except socket.timeout: # If timeout occurs
-                    if not ans:
-                        print('Nenhuma resposta recebida.')
+                    print('Nenhuma resposta recebida.')
                     return
 
+    def received_messages(conn, addr, nseq):
+        msg_type = struct.unpack("!H", conn.recv(2))[0]
+        msg_nseq = struct.unpack("!I", conn.recv(4))[0]
 
-    def received_messages(conn, nseq):
-        msg = conn.recv(2)
-        if msg:
-            recv_msg = struct.unpack("!H", msg)
-            msg_type = recv_msg[0]
+        (src_ip, src_port) = (addr[0], addr[1])
 
-            if msg_type == 9:  # client only receives RESP messages
-                msg_nseq = struct.unpack("!I", conn.recv(4))[0]
-                msg_size = struct.unpack("@H", conn.recv(2))[0]
-                msg_value = conn.recv(msg_size)
-                (src_ip, src_port) = conn.getpeername()
-
-                if(msg_nseq == nseq):
-                    print(msg_value.decode('ascii') + " " + str(src_ip) + ":" + str(src_port))
-                    return True
-                else:
-                    print("Mensagem incorreta recebida de "+str(src_ip)+":"+str(src_port))
-                    return False
-            else:
-                (src_ip, src_port) = conn.getpeername()
-                print("Mensagem incorreta recebida de "+str(src_ip)+":"+str(src_port))
-        return False
-           
+        msg_size = struct.unpack("@H", conn.recv(2))[0]
+        msg_value = conn.recv(msg_size)
+        print(msg_value.decode('ascii') + " " + str(src_ip) + ":" + str(src_port))
 
 
 client = Client() # Creates the object to represent the client
