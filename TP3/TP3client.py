@@ -14,8 +14,7 @@ class Client: # Class to represent each client
         self.serventPort = int(self.serventPort) # Casts the port to be a int
         self.seqNum = 0 
         self.sockets = {}
-        self.sockets['stdin'] = sys.stdin
-        
+
 
     def createSockets(self):
         try:
@@ -61,16 +60,17 @@ class Message: # Class to represent the client message methods
         client.sockets[client.ipPort].send(msg)
         client.seqNum += 1
 
-        try:
-            client.sockets['0'].settimeout(4)
-            # client.sockets['0'].listen()
-            conn, client_address = client.sockets['0'].accept()
-            client.sockets[client_address] = conn
-            Message.received_messages(conn, client_address, client.seqNum)
+        while 1:
+            try:
+                client.sockets['0'].settimeout(4)
+                # client.sockets['0'].listen()
+                conn, client_address = client.sockets['0'].accept()
+                client.sockets[client_address] = conn
+                Message.received_messages(conn, client_address, client.seqNum)
 
-        except socket.timeout: # If timeout occurs
-            print('Nenhuma resposta recebida.')
-            return
+            except socket.timeout: # If timeout occurs
+                print('Nenhuma resposta recebida.')
+                return
                 
     '''
     TOPOREQ
@@ -82,17 +82,18 @@ class Message: # Class to represent the client message methods
             msg = struct.pack('!H', 6) + struct.pack('!I', client.seqNum)
             client.sockets[client.ipPort].send(msg)
             client.seqNum += 1
+            
+            while 1:
+                try:
+                    client.sockets['0'].settimeout(4)
+                    # client.sockets['0'].listen()
+                    conn, client_address = client.sockets['0'].accept()
+                    client.sockets[client_address] = conn
+                    Message.received_messages(conn, client_address, client.seqNum)
 
-            try:
-                client.sockets['0'].settimeout(4)
-                # client.sockets['0'].listen()
-                conn, client_address = client.sockets['0'].accept()
-                client.sockets[client_address] = conn
-                Message.received_messages(conn, client_address, client.seqNum)
-
-            except socket.timeout: # If timeout occurs
-                print('Nenhuma resposta recebida.')
-                return
+                except socket.timeout: # If timeout occurs
+                    print('Nenhuma resposta recebida.')
+                    return
 
     def received_messages(conn, addr, nseq):
         msg_type = struct.unpack("!H", conn.recv(2))[0]
