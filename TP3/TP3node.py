@@ -61,6 +61,7 @@ class Servent:  # Class to represent each servent
             try:
                 conn.connect((addr.split(':')[0] , int(addr.split(':')[1]))) 
                 conn.setblocking(0)
+                print("Conectado ao vizinho "+addr.split(':')[0]+":"+addr.split(':')[1])
 
                 # send id message to conect                                
                 id_msg = struct.pack('!H', 4) + struct.pack('!H', 0)   
@@ -76,7 +77,8 @@ class Servent:  # Class to represent each servent
     # Method to check if the received message is new in the servent by looking into the receivedMessagesList
     def checkMessageIsNew(self, recvMsg):
         if recvMsg in self.receivedMessagesList:
-                return False
+            print("Mensagem descartada")
+            return False
 
         # If the message is new, insert the message in the receivedMessagesList
         self.receivedMessagesList.append(recvMsg)
@@ -132,8 +134,9 @@ class Message:  # Class to represent the servent message methods
 
 
     def recvKeyFlood(servent, ttl, num_seq, ip_orig, porto_orig, size, info, current_socket):  # Method to deal with keyFlood messages
-        if servent.checkMessageIsNew((ip_orig, porto_orig, num_seq)):  # If the key is in the keyDictionary
-            if info in servent.keyDictionary.keys():
+        print("Mensagem de alagamento recebida. Enviando resposta para cliente no porto "+str(porto_orig))
+        if servent.checkMessageIsNew((ip_orig, porto_orig, num_seq)):  
+            if info in servent.keyDictionary.keys(): # If the key is in the keyDictionary
                 Message.sendResp(servent, num_seq, servent.keyDictionary[key], servent.ip, porto_orig)
             else:
                 ttl -= 1
@@ -155,27 +158,27 @@ class Message:  # Class to represent the servent message methods
 
 
     def recvTopoFlood(servent, ttl, num_seq, ip_orig, porto_orig, size, info, current_socket):  # Method to deal with topoFlood messages
+        print("Mensagem de alagamento recebida. Enviando resposta para cliente no porto "+str(porto_orig))
         if servent.checkMessageIsNew((ip_orig, porto_orig, num_seq)):  # If the key is in the keyDictionary
-            if info in servent.keyDictionary.keys():
-                Message.sendResp(servent, num_seq, servent.keyDictionary[key], servent.ip, porto_orig)
-            else:
-                ttl -= 1
-                topoFloodMsg = struct.pack("!H", 8)  # Message type
-                topoFloodMsg += struct.pack("!H", ttl)  # TTL
-                topoFloodMsg += struct.pack("!I", num_seq)  # Sequence Number
+            Message.sendResp(servent, num_seq, info, servent.ip, porto_orig)
+            
+            ttl -= 1
+            topoFloodMsg = struct.pack("!H", 8)  # Message type
+            topoFloodMsg += struct.pack("!H", ttl)  # TTL
+            topoFloodMsg += struct.pack("!I", num_seq)  # Sequence Number
 
-                src_ip = servent.ip.split(".")
-                for i in range(0,4):
-                    topoFloodMsg += struct.pack("!b", int(src_ip[i]))
+            src_ip = servent.ip.split(".")
+            for i in range(0,4):
+                topoFloodMsg += struct.pack("!b", int(src_ip[i]))
 
-                topoFloodMsg += struct.pack("!H", porto_orig) # Client port
-                topoFloodMsg += struct.pack("@H", size) # message size
-                info = " " + servent.ip + ":" + str(servent.port)
-                topoFloodMsg += info.encode('ascii')
+            topoFloodMsg += struct.pack("!H", porto_orig) # Client port
+            topoFloodMsg += struct.pack("@H", size) # message size
+            info = " " + servent.ip + ":" + str(servent.port)
+            topoFloodMsg += info.encode('ascii')
 
-                # if valid TTL, continue, else discard
-                if(ttl > 0):
-                    Message.sendMessageToServentList(servent, topoFloodMsg, current_socket)
+            # if valid TTL, continue, else discard
+            if(ttl > 0):
+                Message.sendMessageToServentList(servent, topoFloodMsg, current_socket)
 
 
     '''
@@ -195,6 +198,7 @@ class Message:  # Class to represent the servent message methods
             s.connect((ip, port))
             s.send(newMessage)
             s.close()
+            print("Mensagem enviada na porta " , (ip, port), bytes.decode(newMessage))
             #print("Dado enviado: " , data)
         except socket.error as e:
             print("Falha ao enviar na porta recebida." , (ip, port) , e )
@@ -208,13 +212,7 @@ class Message:  # Class to represent the servent message methods
             if servent.neighborsPort[neighbor] == 0 and neighbor != current_socket.getpeername():
                 print("Enviando mensagem de alagamento para "+str(servent.sockets[neighbor].getpeername()))
                 servent.sockets[neighbor].send(message)
-                
 
-    # Method to construct the client address to auxiliate the resp message methods
-    def clientAddressConstructor(message):
-        clientPort = int.from_bytes(message[12:14], 'big')
-
-        return ('127.0.0.1', clientPort)
 
 
     def TTLIsValid(message):  # Method to verify the TTL value
@@ -272,7 +270,7 @@ while (servent.sockets):
                         
                         Message.recvTopoReq(servent, num_seq, servent.neighborsPort[current_socket.getpeername()], current_socket)
 
-                    elif (recv_msg == 7): #KEYFLOOD OR TOPOFLOOD
+                    elif (recv_msg == 7): #KEYFLOOD
                         '''
                         +---- 2 ------+- 2 -+-- 4 -+--- 4 ---+----- 2 ----+--- 2 ---+----------\\--------------+
                         | TIPO = 7, 8 | TTL | NSEQ | IP_ORIG | PORTO_ORIG | TAMANHO | INFO (at´e 400 carateres) |
@@ -293,7 +291,7 @@ while (servent.sockets):
 
                         Message.recvKeyFlood(servent, ttl, nseq, ip_orig, porto_orig, size, info, current_socket)
 
-                    elif (recv_msg == 8): #KEYFLOOD OR TOPOFLOOD
+                    elif (recv_msg == 8): # TOPOFLOOD
                         ttl = struct.unpack('!H', current_socket.recv(2))[0]        
                         nseq = struct.unpack('!I', current_socket.recv(4))[0] 
 
