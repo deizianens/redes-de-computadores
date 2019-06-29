@@ -1,310 +1,363 @@
-'''
-Responsável pelo armazenamento da base de dados chave-valor 
-e pelo controle da troca de mensagens com seus parceiros
-'''
 import sys
 import socket
 import struct
 import select
+import queue
 
-class Servent:  # Class to represent each servent
-    # ./TP3node <porto-local> <banco-chave-valor> [ip1:porto1 [ip2:porto2 ...]]
-    def __init__(self):
-        self.ip = '127.0.0.1'  # Local host IP
-        self.port = int(sys.argv[1])
-        self.sockets = {}
-        self.neighbors = {}
-        # List to store the messages received by each servent
-        self.receivedMessagesList = []
-        # Dictionary of keys given by the input file
-        self.keyDictionary = {}  
-        self.keyDictionaryConstructor(sys.argv[2])
-        # Local port received from command line argument
-        self.serventListConstructor(sys.argv[3:])
-        self.createSocket() # create servent socket
+ID_MSG_TYPE = 4
+KEYREQ_MSG_TYPE = 5
+TOPOREQ_MSG_TYPE = 6
+KEYFLOOD_MSG_TYPE = 7
+TOPOFLOOD_MSG_TYPE = 8
+RESP_MSG_TYPE = 9
+LOCALHOST = '127.0.0.1'
 
 
-    def createSocket(self):
-        try:
-            server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # TCP socket creation
-            server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            server_socket.setblocking(0) # no timeout   
-            server_socket.bind((self.ip, int(self.port)))
-            server_socket.listen()
+#+---- 2 ---+--- 2 ---------------------------+
+#| TIPO = 4 |  PORTO (ou zero se for servent) |
+#+----------+---------------------------------+
+def create_id_msg(port):
+	type = struct.pack("!H", ID_MSG_TYPE)
+	port = struct.pack("!H", port)
 
-            self.sockets['0'] = server_socket
-        except KeyboardInterrupt:
-            raise KeyboardInterrupt
-        except socket.error as e:
-            print(e)
-            raise KeyboardInterrupt
+	msg = type + port
+
+	return msg
 
 
-    # Method to construct the key dictionary from the input file
-    def keyDictionaryConstructor(self, inputFile):
-        file = open(inputFile, 'r')
-        keys = file.readlines()
+#+---- 2 ---+-- 4 -+--- 2 ---+---------------------------+
+#| TIPO = 5 | NSEQ | TAMANHO | CHAVE (ate 400 carateres) | 
+#+----------+------+---------+---------------------------+
+def create_keyreq_msg(nseq, key):
+	type = struct.pack("!H", KEYREQ_MSG_TYPE)
+	nseq = struct.pack("!I", nseq)
+	size = struct.pack("@H", len(key))
 
-        for key in keys:
-            # If the first character from the line isn't a comment (#)
-            if key[0] != '#':
-                key = key.split()
-                # Save the key and the value in the key Dictionary
-                self.keyDictionary[key[0]] = str.join(' ', (key[1:]))
-                # print(self.keyDictionary)
-      
+	msg = type + nseq + size + key.encode('ascii')
 
-    # Method to construct the servent list
-    def serventListConstructor(self, servents):
-        for addr in set(servents):
-            conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            try:
-                conn.connect((addr.split(':')[0] , int(addr.split(':')[1]))) 
-                id_msg = struct.pack('!H', 4) + struct.pack('!H', 0)   
-
-                # send id message to conect
-                conn.send(id_msg)
-
-                self.sockets[(addr.split(":")[0] , int(addr.split(":")[1]))] = conn
-                self.neighbors[(addr.split(":")[0] , int(addr.split(":")[1]))] = 0
-
-            except ConnectionRefusedError:
-                print("Erro de conexão " , addr)
+	return msg
 
 
-    # Method to check if the received message is new in the servent by looking into the receivedMessagesList
-    def checkMessageIsNew(self, recvMsg):
-        if recvMsg in self.receivedMessagesList:
-                return False
+#+---- 2 ---+-- 4 -+
+#| TIPO = 6 | NSEQ |
+#+----------+------+
+def create_toporeq_msg(nseq):
+	type = struct.pack("!H", TOPOREQ_MSG_TYPE)
+	nseq = struct.pack("!I", nseq)
 
-        # If the message is new, insert the message in the receivedMessagesList
-        self.receivedMessagesList.append(recvMsg)
-        return True
+	msg = type + nseq
 
-
-class Message:  # Class to represent the servent message methods
-    '''
-    +---- 2 ------+- 2 -+-- 4 -+--- 4 ---+----- 2 ----+--- 2 ---+----------\\--------------+
-    | TIPO = 7, 8 | TTL | NSEQ | IP_ORIG | PORTO_ORIG | TAMANHO | INFO (at´e 400 carateres) |
-    +-------------+-----+------+---------+------------+---------+----------\\--------------+
-    '''
-    def recvKeyReq(servent, key, num_seq, porto_orig, current_socket):  # Method to deal with keyReq messages
-        # If this servent has the key in his keyDictionary, send a resp to the client
-        if key in servent.keyDictionary.keys():
-            print("Servent possui a chave. Enviando resposta para cliente no porto "+str(porto_orig))
-            Message.sendResp(servent, num_seq, servent.keyDictionary[key], servent.ip, porto_orig)
-        else:
-            print("Servent não possui a chave. Iniciando alagamento.")
-            keyFloodMsg = struct.pack("!H", 7)  # Message type
-            keyFloodMsg += struct.pack("!H", 3)  # TTL
-            keyFloodMsg += struct.pack("!I", num_seq)  # Sequence Number
-
-            src_ip = servent.ip.split(".")
-            for i in range(0,4):
-                keyFloodMsg += struct.pack("!b", int(src_ip[i]))
-
-            keyFloodMsg += struct.pack("!H", porto_orig)  # Client port
-            keyFloodMsg += struct.pack("@H", len(key)) # message size
-            keyFloodMsg += key.encode('ascii')
-
-            Message.sendMessageToServentList(servent, keyFloodMsg, current_socket)
+	return msg
 
 
-    def recvTopoReq(servent, num_seq, porto_orig, current_socket):  # Method to deal with topoReq messages
-        print("Requisição de topologia recebida. Iniciando alagamento.")
-        info = servent.ip + ":" + str(servent.port)        
-        Message.sendResp(servent, num_seq, info, servent.ip, porto_orig)
-        
-        topoFloodMsg = struct.pack("!H", 8)  # Message type
-        topoFloodMsg += struct.pack("!H", 3)  # TTL
-        topoFloodMsg += struct.pack("!I", num_seq)  # Sequence Number
+#+---- 2 ------+- 2 -+-- 4 -+--- 4 ---+----- 2 ----+--- 2 ---+--------------------------+ 
+#| TIPO = 7, 8 | TTL | NSEQ | IP_ORIG | PORTO_ORIG | TAMANHO | INFO (ate 400 carateres) | 
+#+-------------+-----+------+---------+------------+---------+--------------------------+
+def create_flood_message(msg_type, ttl, nseq, src_port, info):
+	
+	if msg_type == KEYFLOOD_MSG_TYPE:
+		type = struct.pack("!H", KEYFLOOD_MSG_TYPE)
+	else:
+		type = struct.pack("!H", TOPOFLOOD_MSG_TYPE)
 
-        src_ip = servent.ip.split(".")
-        for i in range(0,4):
-            topoFloodMsg += struct.pack("!b", int(src_ip[i]))
-        
-        topoFloodMsg += struct.pack("!H", porto_orig)  # Client port
-        topoFloodMsg += struct.pack("@H", len(info)) # message size
-        topoFloodMsg += info.encode('ascii')
+	ttl = struct.pack("!H", ttl)
+	nseq = struct.pack("!I", nseq)
+	src_ip = LOCALHOST.split(".")
+	msg = type + ttl + nseq
 
-        Message.sendMessageToServentList(servent, topoFloodMsg, current_socket)
+	for i in range(0,4):
+		msg += struct.pack("!b", int(src_ip[i]))
 
+	src_port = struct.pack("!H", src_port)
+	size = struct.pack("@H", len(info))
+	msg += src_port + size + info.encode('ascii')
 
-    def recvKeyFlood(servent, ttl, num_seq, ip_orig, porto_orig, size, info, current_socket):  # Method to deal with keyFlood messages
-        if servent.checkMessageIsNew((ip_orig, porto_orig, num_seq)):  # If the key is in the keyDictionary
-            if info in servent.keyDictionary.keys():
-                Message.sendResp(servent, num_seq, servent.keyDictionary[key], servent.ip, porto_orig)
-            else:
-                ttl -= 1
-                keyFloodMsg = struct.pack("!H", 7)  # Message type
-                keyFloodMsg += struct.pack("!H", ttl)  # TTL
-                keyFloodMsg += struct.pack("!I", num_seq)  # Sequence Number
-
-                src_ip = servent.ip.split(".")
-                for i in range(0,4):
-                    keyFloodMsg += struct.pack("!b", int(src_ip[i]))
-
-                keyFloodMsg += struct.pack("!H", porto_orig) # Client port
-                keyFloodMsg += struct.pack("@H", size) # message size
-                keyFloodMsg += info.encode('ascii')
-
-                # if valid TTL, continue, else discard
-                if(ttl > 0):
-                    Message.sendMessageToServentList(servent, keyFloodMsg, current_socket)
+	return msg
 
 
-    def recvTopoFlood(servent, ttl, num_seq, ip_orig, porto_orig, size, info, current_socket):  # Method to deal with topoFlood messages
-        if servent.checkMessageIsNew((ip_orig, porto_orig, num_seq)):  # If the key is in the keyDictionary
-            if info in servent.keyDictionary.keys():
-                Message.sendResp(servent, num_seq, servent.keyDictionary[key], servent.ip, porto_orig)
-            else:
-                ttl -= 1
-                topoFloodMsg = struct.pack("!H", 8)  # Message type
-                topoFloodMsg += struct.pack("!H", ttl)  # TTL
-                topoFloodMsg += struct.pack("!I", num_seq)  # Sequence Number
+#+---- 2 ---+-- 4 -+--- 2 ---+---------------------------+ 
+#| TIPO = 9 | NSEQ | TAMANHO | VALOR (ate 400 carateres) | 
+#+----------+------+---------+---------------------------+
+def create_resp_msg(nseq, value):
+	type = struct.pack("!H", RESP_MSG_TYPE)
+	nseq = struct.pack("!I", nseq)
+	size = struct.pack("@H", len(value))
 
-                src_ip = servent.ip.split(".")
-                for i in range(0,4):
-                    topoFloodMsg += struct.pack("!b", int(src_ip[i]))
+	msg = type + nseq + size + value.encode('ascii')
 
-                topoFloodMsg += struct.pack("!H", porto_orig) # Client port
-                topoFloodMsg += struct.pack("@H", size) # message size
-                info = " " + servent.ip + ":" + str(servent.port)
-                topoFloodMsg += info.encode('ascii')
+	return msg
 
-                # if valid TTL, continue, else discard
-                if(ttl > 0):
-                    Message.sendMessageToServentList(servent, topoFloodMsg, current_socket)
+# Tratamento das mensagens recebidas por um client vindas de um servent
+def receive_servent_msg(con, addr, nseq):
+	msg_type = struct.unpack("!H", con.recv(2))[0]
+	msg_nseq = struct.unpack("!I", con.recv(4))[0]
+
+	(src_ip, src_port) = (addr[0], addr[1])
+
+	# Tratamento em caso de erros na mensagem recebida
+	if msg_type != 9 or msg_nseq != nseq:
+		print("Mensagem incorreta recebida de " + str(src_ip) + ":" + str(src_port))
+	else:
+		msg_size = struct.unpack("@H", con.recv(2))[0]
+		msg_value = con.recv(msg_size)
+		print(msg_value.decode('ascii') + " " + str(src_ip) + ":" + str(src_port))
+
+# Obtem e retorna os dados da mensagem KEYREQ
+def get_keyreq_msg_data(con):
+	nseq = struct.unpack("!I", con.recv(4))[0]
+	size = struct.unpack("@H", con.recv(2))[0]
+	key = con.recv(size)
+
+	return nseq, key.decode('ascii')
+
+# Obtem e retorna os dados da mensagem TOPOREQ
+def get_toporeq_msg_data(con):
+	nseq = struct.unpack("!I", con.recv(4))[0]
+
+	return nseq
+
+# Obtem e retorna os dados da mensagem KEYFLOOD/TOPOFLOOD
+def get_flood_msg_data(con):
+	ttl = struct.unpack("!H", con.recv(2))[0]
+	nseq = struct.unpack("!I", con.recv(4))[0]
+
+	src_ip_1 = struct.unpack("!b", con.recv(1))[0]
+	src_ip_2 = struct.unpack("!b", con.recv(1))[0]
+	src_ip_3 = struct.unpack("!b", con.recv(1))[0]
+	src_ip_4 = struct.unpack("!b", con.recv(1))[0]
+
+	src_ip = src_ip_1 + src_ip_2 + src_ip_3 + src_ip_4
+
+	src_port = struct.unpack("!H", con.recv(2))[0]
+	size = struct.unpack("@H", con.recv(2))[0]
+	info = con.recv(size)
+
+	return ttl, nseq, src_ip, src_port, info.decode('ascii')
+
+def read_file(file_name):
+	try:
+		file = open(file_name, "r")
+	except (OSError, IOError) as error:
+		print("Erro ao abrir arquivo.")
+
+	# Monta o dicionario chave-valor com base no arquivo
+	dictionary = {}
+	for line in file:
+		if not line.isspace(): # Linha nao vazia
+			words = line.split()
+			if words[0] != '#': # Primeira palavra da linha
+				first_character = str.strip(words[0][0])
+				if first_character != '#': # Verifica se o primeiro caracter nao e' #
+					key = str.strip(words[0])
+					text = words[1:]
+					value = ' '.join(text)
+					dictionary.update({ key : value })
+
+	file.close()
+
+	return dictionary
 
 
-    '''
-    RESP
-    +---- 2 ---+-- 4 -+--- 2 ---+----------\\---------------+
-    | TIPO = 9 | NSEQ | TAMANHO | VALOR (up to 400 characters) |
-    +----------+------+---------+----------\\---------------+
-    '''
-    # Method to send the resp message to the client from a keyReq
-    def sendResp(servent, nseq, value, ip, port):
-        newMessage = struct.pack("!H", 9)  # Message type
-        newMessage += struct.pack("!I", nseq)  # Sequence Number
-        newMessage += struct.pack("@H", len(value))  # Message size
-        newMessage += value.encode('ascii')
-        try:
-            s = socket.socket(socket.AF_INET , socket.SOCK_STREAM)
-            s.connect((ip, port))
-            s.send(newMessage)
-            s.close()
-            #print("Dado enviado: " , data)
-        except socket.error as e:
-            print("Falha ao enviar na porta recebida." , (ip, port) , e )
+def set_servent_socket(servert_addr):
+	# Realiza a configuracao do socket do servent principal
+	servent_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+	servent_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+	servent_socket.setblocking(0)
+	servent_socket.bind(servert_addr)
 
-    # Method to send the message to all servents in the servent list
-    def sendMessageToServentList(servent, message, current_socket):
-        for neighbor in servent.sockets:
-            if neighbor == '0': # dont send to servent or who sent me
-                continue
-
-            if servent.neighbors[neighbor] == 0 and neighbor is not current_socket:
-                print("Enviando mensagem de alagamento para "+str(servent.sockets[neighbor].getpeername()))
-                servent.sockets[neighbor].send(message)
-
-    # Method to construct the client address to auxiliate the resp message methods
-    def clientAddressConstructor(message):
-        clientPort = int.from_bytes(message[12:14], 'big')
-
-        return ('127.0.0.1', clientPort)
+	return servent_socket
 
 
-    def TTLIsValid(message):  # Method to verify the TTL value
-        return True if int.from_bytes(message[2:4], 'big') > 0 else False
+def connect_to_neighbor(connection_socket, neighbor):
+	# Conecta o servent ao vizinho
+	neighbor_ip = neighbor.split(":")[0]
+	neighbor_port = int(neighbor.split(":")[1])
+	neighbor_addr = (neighbor_ip, neighbor_port)
+
+	connection_socket.connect(neighbor_addr)
+	connection_socket.setblocking(0)
+
+	# Envia mensagem ID para o vizinho
+	msg = create_id_msg(0)
+	connection_socket.send(msg)
 
 
-servent = Servent()  # Creates the servent object
+def send_msg_to_client(msg, src_ip, src_port):
+	# Configura o socket pra enviar a resposta
+	client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+	client_addr = (src_ip, src_port)
+	client_socket.connect(client_addr)
+	client_socket.send(msg)
+	client_socket.close()
 
-while (servent.sockets):
-    try:
-        
-        read_s, write_s, except_s = select.select([servent.sockets[sock] for sock in servent.sockets], [], [])
 
-        for current_socket in read_s:
-            
-            if current_socket is servent.sockets['0']: # servent socket = new connection
-                conn, client_address = current_socket.accept()
-                conn.setblocking(0) # No timeouts.
-                servent.sockets[client_address] = conn
+def flood_msg(msg, connection):
+	for input in inputs:
+		# Envia a mensagem para todos vizinhos, exceto o que enviou a mensagem
+		if input is not servent_socket and input is not connection:
+			input.send(msg)
 
-            else: # identify what kind of message is coming
-                recv_msg = struct.unpack('!H', current_socket.recv(2))[0] 
-                '''
-                ID  
-                +---- 2 ---+--- 2 ---------------------------+
-                | TIPO = 4 | PORTO (ou zero se for servent) |
-                +----------+---------------------------------+
-                '''
-                if (recv_msg == 4): #ID message
-                    print("Recebeu ID em "+str(current_socket.getpeername()))
-                    recv_port = struct.unpack("!H", current_socket.recv(2))[0]
-                    servent.neighbors[current_socket.getpeername()] = recv_port
-             
-                elif (recv_msg == 5): # KEYREQ
-                    '''
-                    KEYREQ
-                    +---- 2 ---+-- 4 -+--- 2 ---+----------\\---------------+
-                    | TIPO = 5 | NSEQ | TAMANHO | CHAVE (até 400 carateres) |
-                    +----------+------+---------+----------\\---------------+
-                    '''
-                    num_seq = struct.unpack("!I", current_socket.recv(4))[0]
-                    size = struct.unpack("!H", current_socket.recv(2))[0]
-                    key = current_socket.recv(size).decode('ascii')
 
-                    Message.recvKeyReq(servent, key, num_seq, servent.neighbors[current_socket.getpeername()], current_socket)
+def verify_if_has_key(key_values, key, nseq, port, connection, ttl):
+	# Verifica se possui a chave consultada
+	if key in key_values.keys():
+		msg = create_resp_msg(nseq, key_values[key])
+		send_msg_to_client(msg, LOCALHOST, port)
+	else:
+		# Transmite a mensagem keyflood a todos os vizinhos, se TTL maior que 0
+		if ttl > 0:
+			msg = create_flood_message(KEYFLOOD_MSG_TYPE, 
+				ttl, nseq, port, key)
+			flood_msg(msg, connection)
 
-                elif (recv_msg == 6): #TOPOREQ
-                    '''
-                    +---- 2 ---+-- 4 -+
-                    | TIPO = 6 | NSEQ |
-                    +----------+------+
-                    '''
-                    num_seq = struct.unpack("!I", current_socket.recv(4))[0]
-                    
-                    Message.recvTopoReq(servent, num_seq, servent.neighbors[current_socket.getpeername()], current_socket)
+# Fim das declaracoes de funcoes
 
-                elif (recv_msg == 7): #KEYFLOOD OR TOPOFLOOD
-                    '''
-                    +---- 2 ------+- 2 -+-- 4 -+--- 4 ---+----- 2 ----+--- 2 ---+----------\\--------------+
-                    | TIPO = 7, 8 | TTL | NSEQ | IP_ORIG | PORTO_ORIG | TAMANHO | INFO (at´e 400 carateres) |
-                    +-------------+-----+------+---------+------------+---------+----------\\--------------+
-                    '''
-                    ttl = struct.unpack('!H', current_socket.recv(2))[0]        
-                    nseq = struct.unpack('!I', current_socket.recv(4))[0] 
+# Fluxo principal do programa
 
-                    ip1 = struct.unpack("!b", current_socket.recv(1))[0]
-                    ip2 = struct.unpack("!b", current_socket.recv(1))[0]
-                    ip3 = struct.unpack("!b", current_socket.recv(1))[0]
-                    ip4 = struct.unpack("!b", current_socket.recv(1))[0] 
-                    ip_orig = ip1 + ip2 + ip3 + ip4
+params = len(sys.argv)
 
-                    porto_orig = struct.unpack('!H', current_socket.recv(2))[0] 
-                    size = struct.unpack('!H', current_socket.recv(2))[0]    
-                    info = current_socket.recv(size).decode('ascii')
+if params < 3:
+	print("Formato esperado: python servent.py <porto-local> <banco-chave-valor> [ip1: porto1 [ip2:porto2 ...]]")
+	sys.exit()
 
-                    Message.recvKeyFlood(servent, ttl, nseq, ip_orig, porto_orig, size, info, current_socket)
+# Obtem dados da porta e do arquivo da entrada
+LOCALPORT = int(sys.argv[1])
+FILE = sys.argv[2]
 
-                elif (recv_msg == 8): #KEYFLOOD OR TOPOFLOOD
-                    ttl = struct.unpack('!H', current_socket.recv(2))[0]        
-                    nseq = struct.unpack('!I', current_socket.recv(4))[0] 
+# Adiciona os vizinhos passados por parametro
+neighbors = list()
+for i in range(3, params):
+	neighbors.append(sys.argv[i])
 
-                    ip1 = struct.unpack("!b", current_socket.recv(1))[0]
-                    ip2 = struct.unpack("!b", current_socket.recv(1))[0]
-                    ip3 = struct.unpack("!b", current_socket.recv(1))[0]
-                    ip4 = struct.unpack("!b", current_socket.recv(1))[0] 
-                    ip_orig = ip1 + ip2 + ip3 + ip4
+# Monta o dicionario de par chave-valor do servent corrente 
+key_values = {}
+key_values = read_file(FILE)
 
-                    porto_orig = struct.unpack('!H', current_socket.recv(2))[0] 
-                    size = struct.unpack('!H', current_socket.recv(2))[0]    
-                    info = current_socket.recv(size).decode('ascii')
+# Configura socket principal que recebe conexoes/mensagens
+servert_addr = (LOCALHOST, LOCALPORT)
+servent_socket = set_servent_socket(servert_addr)
+servent_socket.listen()
 
-                    Message.recvTopoFlood(servent, ttl, nseq, ip_orig, porto_orig, size, info, current_socket)
+received_msgs = list() 		# Lista das mensagens ja recebidas
+connected_servents = list()	# Lista dos servents conectados
+connected_clients = {}		# Lista com os clientes conectados
+inputs = [servent_socket]	# Sockets que vamos ler
+outputs = [] 				# Sockets que vamos escrever
+message_queues = {} 		# Filas de mensagens enviadas
 
-    except KeyboardInterrupt:
-        raise KeyboardInterrupt
+# Percorre a lista de vizinhos do servent e conecta a cada um deles
+for neighbor in neighbors:
+	connection_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+	connect_to_neighbor(connection_socket, neighbor)
+	inputs.append(connection_socket)
+	message_queues[connection_socket] = queue.Queue()
+
+while inputs:
+
+	try:
+		# Aguarda pelo menos um dos sockets estar pronto para ser processado
+		readable, writable, exceptional = select.select(inputs, outputs, inputs)
+
+		for current_socket in readable:
+			if current_socket is servent_socket:
+				connection, client_address = current_socket.accept()
+				connection.setblocking(0)
+				inputs.append(connection)
+
+				# Fornece a conexão para enfileirar os dados que desejamos enviar
+				message_queues[connection] = queue.Queue()
+
+			else:
+				# Obtem o tipo da mensagem recebida
+				msg_type = struct.unpack("!H", current_socket.recv(2))[0]
+
+				if msg_type:
+					# Trata o recebimento de mensagem do tipo ID
+					if msg_type == ID_MSG_TYPE:
+						msg_port = struct.unpack("!H", current_socket.recv(2))[0]
+						if msg_port == 0:
+							connected_servents.append(current_socket.getpeername())
+						else:
+							connected_clients.update({ current_socket.getpeername() : msg_port })
+					
+					# Trata o recebimento de mensagem do tipo keyreq
+					elif msg_type == KEYREQ_MSG_TYPE:
+						nseq, key = get_keyreq_msg_data(current_socket)
+						client_port = connected_clients[current_socket.getpeername()]
+						verify_if_has_key(key_values, key, nseq, client_port, current_socket, 3)
+					
+					# Trata o recebimento de mensagem do tipo toporeq
+					elif msg_type == TOPOREQ_MSG_TYPE:
+						nseq = get_toporeq_msg_data(current_socket)
+						info = LOCALHOST + ":" + str(LOCALPORT)
+						resp_msg = create_resp_msg(nseq, info)
+
+						client_port = connected_clients[current_socket.getpeername()]
+						send_msg_to_client(resp_msg, LOCALHOST, client_port)
+						
+						# Transmite a mensagem topoflood a todos os vizinhos
+						msg = create_flood_message(TOPOFLOOD_MSG_TYPE, 
+								3, nseq, client_port, info)
+						flood_msg(msg, current_socket)
+						
+					# Trata o recebimento de mensagem do tipo keyflood
+					elif msg_type == KEYFLOOD_MSG_TYPE:
+						ttl, nseq, src_ip, src_port, key = get_flood_msg_data(current_socket)
+						received_msg = (src_ip, src_port, nseq)
+
+						# Verifica se ja recebeu essa mensagem antes
+						if received_msg not in received_msgs:
+							ttl -= 1
+							received_msgs.append(received_msg)
+							# Verifica se possui a chave consultada
+							verify_if_has_key(key_values, key, nseq, src_port, current_socket, ttl)
+					
+					# Trata o recebimento de mensagem do tipo topoflood
+					elif msg_type == TOPOFLOOD_MSG_TYPE:
+						ttl, nseq, src_ip, src_port, info = get_flood_msg_data(current_socket)
+						received_msg = (src_ip, src_port, nseq)
+						# Verifica se ja recebeu essa mensagem antes
+						if received_msg not in received_msgs:
+							ttl -= 1
+							received_msgs.append(received_msg)
+							info += " " + servert_addr[0] + ":" + str(servert_addr[1])
+
+							# Envia a mensagem resp para o client
+							resp_msg = create_resp_msg(nseq, info)
+							send_msg_to_client(resp_msg, LOCALHOST, src_port)
+
+							if ttl > 0:
+								# Transmite a mensagem a todos os vizinhos, exceto o que mandou a msg
+								msg = create_flood_message(TOPOFLOOD_MSG_TYPE, 
+									ttl, nseq, src_port, info)
+								flood_msg(msg, current_socket)
+
+					# Adiciona um canal de saida para resposta
+					if current_socket not in outputs:
+						outputs.append(current_socket)
+				
+				else:
+					# Deixa de escutar por input na conexao
+					if current_socket in outputs:
+						outputs.remove(current_socket)
+					inputs.remove(current_socket)
+					current_socket.close()
+
+					# Remove a fila de mensagem
+					del message_queues[current_socket]
+
+		# Gerencia saidas
+		for current_socket in writable:
+			try:
+				next_msg = message_queues[current_socket].get_nowait()
+			except queue.Empty:
+				# Nenhuma mensagem aguardando, logo para de checkar
+				outputs.remove(current_socket)
+			else:
+				current_socket.send(next_msg)
+
+	except KeyboardInterrupt: # Encerra execucao no caso de Ctrl-C
+		for current_socket in inputs:
+			current_socket.close()
+		servent_socket.close()
+		sys.exit()
