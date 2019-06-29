@@ -14,23 +14,21 @@ class Client: # Class to represent each client
         self.serventIp, self.serventPort = sys.argv[2].split(':') # Gets the servent ip and port from the input_ line argument
         self.serventPort = int(self.serventPort) # Casts the port to be a int
         self.seqNum = 0 
-        self.sockets = {}
-        self.sockets['stdin'] = sys.stdin
+        self.createSockets()
 
     def createSockets(self):
         try:
-            client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # TCP socket creation
-            client_sock.bind(("", int(self.port)))
-            client_sock.listen()
+            self.client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # TCP socket creation
+            self.client_sock.bind(("", int(self.port)))
+            # self.client_sock.listen()
 
-            self.sockets['0'] = client_sock
         except socket.error as e:
             print("Erro de conexão (1). ", e)
             sys.exit()
 
         try:
-            servent_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # TCP socket creation
-            servent_sock.connect((self.serventIp, self.serventPort))
+            self.servent_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # TCP socket creation
+            self.servent_sock.connect((self.serventIp, self.serventPort))
             
             '''
             ID
@@ -39,9 +37,7 @@ class Client: # Class to represent each client
             +----------+---------------------------------+
             '''    
             msg = struct.pack('!H', 4) + struct.pack('!H', int(self.port))   # ID message to identify as servent or client (servent = 0, client = port)
-            servent_sock.send(msg)
-
-            self.sockets[self.ipPort]  = servent_sock
+            self.servent_sock.send(msg)
 
         except socket.error as e:
             print("Erro de conexão (2). ", e)
@@ -54,23 +50,23 @@ class Message: # Class to represent the client message methods
     +----------+------+---------+----------\\---------------+
     '''
     def sendKeyReq(client, message): # Method to send a keyReq message to a servent
-        client.seqNum += 1
         consult = message
         msg = struct.pack('!H', 5) + struct.pack('!I', client.seqNum) + struct.pack('@H', len(consult)) 
         msg += consult.encode('ascii')
 
-        client.sockets[client.ipPort].send(msg)
+        client.servent_sock.send(msg)
+        client.seqNum += 1
+        
+        while 1:
+            try:
+                client.client_sock.settimeout(4)
+                client.client_sock.listen()
+                conn, client_address = client.client_sock.accept()
+                ans = Message.received_messages(conn, client.seqNum)
 
-        # while 1:
-        try:
-                client.sockets['0'].settimeout(4)
-                # client.sockets['0'].listen()
-                conn, client_address = client.sockets['0'].accept()
-                client.sockets[client_address] = conn
-                # Message.received_messages(conn, client_address, client.seqNum)
-
-        except socket.timeout: # If timeout occurs
-                print('Nenhuma resposta recebida.')
+            except socket.timeout: # If timeout occurs
+                if not ans:
+                    print('Nenhuma resposta recebida.')
                 return
                 
     '''
@@ -80,31 +76,46 @@ class Message: # Class to represent the client message methods
     +----------+------+
     '''
     def sendTopoReq(client): # Method to send a topoReq message to a servent
-            client.seqNum += 1            
             msg = struct.pack('!H', 6) + struct.pack('!I', client.seqNum)
-            client.sockets[client.ipPort].send(msg)
+            client.servent_sock.send(msg)
+            client.seqNum += 1            
             
-            # while 1:
-            try:
-                    client.sockets['0'].settimeout(4)
-                    # client.sockets['0'].listen()
-                    conn, client_address = client.sockets['0'].accept()
-                    client.sockets[client_address] = conn
-                    # Message.received_messages(conn, client_address, client.seqNum)
+            while 1:
+                try:
+                    client.client_sock.settimeout(4)
+                    client.client_sock.listen()
+                    conn, client_address = client.client_sock.accept()
+                    ans = Message.received_messages(conn, client.seqNum)
 
-            except socket.timeout: # If timeout occurs
-                    print('Nenhuma resposta recebida.')
+                except socket.timeout: # If timeout occurs
+                    if not ans:
+                        print('Nenhuma resposta recebida.')
                     return
 
-    def received_messages(conn, addr, nseq):
-        msg_type = struct.unpack("!H", conn.recv(2))[0]
-        msg_nseq = struct.unpack("!I", conn.recv(4))[0]
 
-        (src_ip, src_port) = (addr[0], addr[1])
+    def received_messages(conn, nseq):
+        msg = conn.recv(2)
+        if msg:
+            recv_msg = struct.unpack("!H", msg)
+            msg_type = recv_msg[0]
 
-        msg_size = struct.unpack("@H", conn.recv(2))[0]
-        msg_value = conn.recv(msg_size)
-        print(msg_value.decode('ascii') + " " + str(src_ip) + ":" + str(src_port))
+            if msg_type == 9:  # client only receives RESP messages
+                msg_nseq = struct.unpack("!I", conn.recv(4))[0]
+                msg_size = struct.unpack("@H", conn.recv(2))[0]
+                msg_value = conn.recv(msg_size)
+                (src_ip, src_port) = conn.getpeername()
+
+                if(msg_nseq == nseq):
+                    print(msg_value.decode('ascii') + " " + str(src_ip) + ":" + str(src_port))
+                    return True
+                else:
+                    print("Mensagem incorreta recebida de "+str(src_ip)+":"+str(src_port))
+                    return False
+            else:
+                (src_ip, src_port) = conn.getpeername()
+                print("Mensagem incorreta recebida de "+str(src_ip)+":"+str(src_port))
+        return False
+           
 
 
 client = Client() # Creates the object to represent the client
@@ -112,74 +123,23 @@ client.createSockets() # sockets to comunicate
 
 print('SERVENT IP:', client.serventIp, '\nSERVENT PORT:', client.serventPort)
 
-try:
-    while(1):
-        read_s, write_s, except_s = select.select([client.sockets[sock] for sock in client.sockets], [], [])
+while 1:
+    message = input('Insira um comando:\n> ')
 
-        for current_socket in read_s:
-                if current_socket is client.sockets['stdin']:
-                        input_ = current_socket.readline().replace('\0', "").replace('\n', "")
+    if message[0].upper() == '?':
+        message = message[1:].replace(' ','').replace('\t','') # Replaces the spaces and tabs
+        Message.sendKeyReq(client, message)
 
-                        if ((input_[0] == "?" and (input_[1] == " " or input_[1] == '\t')) or (input_ == "T" or input_ == 't')):
+    elif message[0].upper() == 'T':
+        Message.sendTopoReq(client)
 
-                            if(input_[0] == "?" and (input_[1] == " " or input_[1] == '\t')):
-                                key_ = input_[2:]
-                                message= struct.pack('>h', 5) + struct.pack('>i', client.seqNum) + struct.pack('>h', len(key_)) 
-                                message+= str.encode(key_)
+    elif message[0].upper() == 'Q':
+        for con in client.sockets:
+                client.sockets[con].close() 
+        print('Socket do client finalizado com sucesso.')
+        break
 
-                            if(input_ == "T" or input_ == 't'):
-                                message= struct.pack('>h', 6) + struct.pack('>i', client.seqNum)
+    else:
+        print('Comando invalido. Por favor, insira um novo comando.\n')
 
-                            client.sockets[client.ipPort].send(message)
-
-                            try:
-                                client.sockets['0'].settimeout(4)
-                                connection, client_address = client.sockets['0'].accept()
-                                client.sockets[client_address] = connection
-                                
-                            except socket.timeout:
-                                print("Nenhuma resposta recebida")     
-
-                        elif(input_ == "Q" or input_ == 'q'):
-                            raise KeyboardInterrupt
-                        else:
-                            print("Comando desconhecido")
-
-                elif current_socket is client.sockets['0']:
-                        try:
-                            connection, client_address = current_socket.accept()
-                            client.sockets[client_address] = connection
-                        except socket.timeout:
-                            continue
-                
-                else:
-                        #  RESP
-                        #+---- 2 ---+-- 4 -+--- 2 ---+----------\\---------------+
-                        #| TIPO = 9 | NSEQ | TAMANHO | VALOR (até 400 carateres) |
-                        #+----------+------+---------+----------\\---------------+
-                        data = current_socket.recv(2)  # receive message type
-                        
-                        if data:
-                            type_ = struct.unpack('>h', data)[0]
-                            if type_ == 9:
-                                nseq = struct.unpack('>i', current_socket.recv(4))[0]
-                                if(nseq != client.seqNum):
-                                    print("Mensagem incorreta.")
-                                else:
-                                    size = struct.unpack('>h', current_socket.recv(2))[0]
-
-                                    value = ""
-                                    for _ in range(size):
-                                        value += bytes.decode(current_socket.recv(1))
-
-                                    print(value, str(current_socket.getpeername()[0])+":"+str(current_socket.getpeername()[1]))
-
-                                del client.sockets[current_socket.getpeername()]
-                                current_socket.close()
-                        else:
-                            raise KeyboardInterrupt
-except KeyboardInterrupt:
-    raise KeyboardInterrupt
-except Exception as e:
-    print(e)
-    raise
+    print('')
